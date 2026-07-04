@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Декодер — онлайн-игра в ассоциации и шифры</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="scanlines" aria-hidden="true"></div>
+
+<div id="app">
+
+  <!-- ЭКРАН 1: ВХОД -->
+  <section id="screen-landing" class="screen active">
+    <div class="landing-wrap">
+      <div class="brand">
+        <span class="brand-mark">◈</span>
+        <h1>ДЕКОДЕР</h1>
+      </div>
+      <p class="tagline">Передай код своей команде. Взломай код соперника.</p>
+
+      <div class="panel">
+        <label class="field">
+          <span class="field-label">Ваше имя</span>
+          <input id="input-name" type="text" maxlength="20" placeholder="Агент 007" autocomplete="off">
+        </label>
+
+        <div class="landing-actions">
+          <button id="btn-create" class="btn btn-primary">Создать комнату</button>
+
+          <div class="divider"><span>или</span></div>
+
+          <label class="field">
+            <span class="field-label">Код комнаты</span>
+            <input id="input-room-code" type="text" maxlength="4" placeholder="XXXX" autocomplete="off" class="mono code-input">
+          </label>
+          <button id="btn-join" class="btn btn-secondary">Войти в комнату</button>
+        </div>
+
+        <p id="landing-error" class="error-text" hidden></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ЭКРАН 2: ЛОББИ -->
+  <section id="screen-lobby" class="screen">
+    <header class="topbar">
+      <div class="room-code-badge">
+        Код комнаты <strong id="lobby-room-code" class="mono">----</strong>
+        <button id="btn-copy-link" class="btn-icon" title="Скопировать ссылку">⧉</button>
+      </div>
+      <button id="btn-leave-lobby" class="btn-icon" title="Выйти из комнаты">🚪</button>
+    </header>
+
+    <div class="lobby-wrap">
+      <p class="lobby-hint">Отправьте ссылку или код союзникам, чтобы они присоединились с телефона или компьютера.</p>
+
+      <div class="teams-grid">
+        <div class="team-column team-a">
+          <div class="team-heading">
+            <span class="team-dot"></span> Команда А
+          </div>
+          <ul id="team-a-list" class="player-list"></ul>
+          <button class="btn btn-join-team" data-team="A">Встать в команду А</button>
+        </div>
+
+        <div class="team-column team-b">
+          <div class="team-heading">
+            <span class="team-dot"></span> Команда Б
+          </div>
+          <ul id="team-b-list" class="player-list"></ul>
+          <button class="btn btn-join-team" data-team="B">Встать в команду Б</button>
+        </div>
+      </div>
+
+      <div id="unassigned-wrap" class="unassigned-wrap">
+        <span class="field-label">Ещё не в команде</span>
+        <ul id="unassigned-list" class="player-list inline"></ul>
+      </div>
+
+      <button id="btn-start-game" class="btn btn-primary btn-large" disabled>Начать игру</button>
+      <p id="lobby-status" class="hint-text">Нужно от 2 до 4 игроков в каждой команде</p>
+    </div>
+  </section>
+
+  <!-- ЭКРАН 3: ИГРА -->
+  <section id="screen-game" class="screen">
+    <header class="topbar game-topbar">
+      <div class="scoreboard">
+        <div class="score-pill team-a">
+          <span class="score-label">А</span>
+          <span class="score-stat" title="Перехвачено соперником">🎯<b id="score-a-int">0</b></span>
+          <span class="score-stat" title="Не расшифровано своей командой">✖<b id="score-a-mis">0</b></span>
+        </div>
+        <div class="round-indicator">Раунд <span id="round-number">1</span></div>
+        <div class="score-pill team-b">
+          <span class="score-label">Б</span>
+          <span class="score-stat" title="Перехвачено соперником">🎯<b id="score-b-int">0</b></span>
+          <span class="score-stat" title="Не расшифровано своей командой">✖<b id="score-b-mis">0</b></span>
+        </div>
+      </div>
+      <button id="btn-toggle-history" class="btn-icon" title="История раундов">📜</button>
+      <button id="btn-leave-game" class="btn-icon" title="Выйти из комнаты">🚪</button>
+    </header>
+
+    <div class="game-wrap">
+
+      <div id="roster-row" class="roster-row"></div>
+
+      <div id="pause-banner" class="pause-banner" hidden>⏸ <span id="pause-banner-text"></span></div>
+
+      <!-- Слова моей команды -->
+      <div class="decoder-terminal" id="my-words-terminal">
+        <div class="terminal-label">Слова вашей команды</div>
+        <div class="word-slots" id="word-slots"></div>
+      </div>
+
+      <!-- ФАЗА: подсказки -->
+      <div id="phase-clue-giving" class="phase-panel">
+        <div id="clue-timer" class="clue-timer mono" hidden>01:30</div>
+        <div id="encryptor-view" class="encryptor-view" hidden>
+          <div class="code-reveal">
+            <span class="field-label">Ваш код на этот раунд</span>
+            <div id="my-code-digits" class="code-digits mono"></div>
+          </div>
+          <p class="hint-text">Придумайте по одной ассоциации на каждую цифру кода, по порядку. Нельзя называть сами слова.</p>
+          <div class="clue-inputs" id="clue-inputs"></div>
+          <button id="btn-submit-clues" class="btn btn-primary">Передать подсказки</button>
+        </div>
+        <div id="waiting-view" class="waiting-view">
+          <div class="spinner" aria-hidden="true"></div>
+          <p id="waiting-text">Шифровальщик придумывает подсказки…</p>
+        </div>
+      </div>
+
+      <!-- ФАЗА: догадки -->
+      <div id="phase-guessing" class="phase-panel">
+        <div class="clues-board">
+          <div class="clue-card" id="clue-card-mine">
+            <div class="clue-card-head">Подсказки вашей команды</div>
+            <ol id="clues-mine" class="clue-list"></ol>
+          </div>
+          <div class="clue-card" id="clue-card-opponent">
+            <div class="clue-card-head">Подсказки соперника</div>
+            <ol id="clues-opponent" class="clue-list"></ol>
+          </div>
+        </div>
+
+        <div class="guess-boards">
+          <div class="guess-board" id="guess-board-own">
+            <div class="guess-board-head">Наш код <span class="hint-text" id="own-board-hint">(расшифруйте свои подсказки)</span></div>
+            <div class="digit-picker" data-kind="own" id="picker-own"></div>
+            <button class="btn btn-secondary btn-lock" data-kind="own" id="lock-own">Подтвердить</button>
+          </div>
+          <div class="guess-board" id="guess-board-intercept">
+            <div class="guess-board-head">Код соперника <span class="hint-text">(попробуйте перехватить)</span></div>
+            <div class="digit-picker" data-kind="intercept" id="picker-intercept"></div>
+            <button class="btn btn-secondary btn-lock" data-kind="intercept" id="lock-intercept">Подтвердить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ФАЗА: результат -->
+      <div id="phase-reveal" class="phase-panel">
+        <div class="reveal-board" id="reveal-board"></div>
+        <p class="hint-text">Следующий раунд начнётся через <span id="next-round-seconds" class="mono">10</span> сек…</p>
+      </div>
+
+      <!-- ИСТОРИЯ -->
+      <aside id="history-panel" class="history-panel" hidden>
+        <div class="history-head">
+          <span>История</span>
+          <button id="btn-close-history" class="btn-icon">✕</button>
+        </div>
+        <div class="history-tabs">
+          <button class="history-tab active" data-tab="rounds">Раунды</button>
+          <button class="history-tab" data-tab="assoc">Ассоциации</button>
+        </div>
+        <div id="history-content" class="history-content"></div>
+        <div id="assoc-content" class="history-content" hidden></div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
+  <section id="screen-finished" class="screen">
+    <div class="finished-wrap">
+      <div class="brand-mark large">◈</div>
+      <h2 id="finished-title">Игра окончена</h2>
+      <p id="finished-reason" class="tagline"></p>
+      <button id="btn-play-again" class="btn btn-primary btn-large">Играть ещё раз</button>
+      <p id="finished-wait-hint" class="hint-text" hidden>Ждём хоста…</p>
+    </div>
+  </section>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

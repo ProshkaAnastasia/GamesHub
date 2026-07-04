@@ -1,0 +1,9 @@
+services:
+  decoder:
+    build: .
+    container_name: decoder-game
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
