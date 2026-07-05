@@ -37,18 +37,19 @@ function clearDisconnectTimer(roomCode, playerId) {
 // roomCode -> таймер автоматического старта следующего раунда после результата
 const revealTimers = new Map();
 
-function scheduleRevealAdvance(room) {
+function scheduleRevealAdvance(room, delayMs = REVEAL_TIME_MS) {
   const existing = revealTimers.get(room.code);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
     revealTimers.delete(room.code);
     const res = room.nextRound();
     if (res.ok) broadcastRoom(room);
-  }, REVEAL_TIME_MS);
+  }, Math.max(0, delayMs));
   revealTimers.set(room.code, timer);
 }
 
 function broadcastRoom(room) {
+  manager.save(room);
   for (const player of room.players.values()) {
     const sockId = [...sessions.entries()].find(
       ([, s]) => s.roomCode === room.code && s.playerId === player.id
@@ -60,6 +61,10 @@ function broadcastRoom(room) {
 }
 
 io.on('connection', (socket) => {
+  socket.on('list-rooms', (_, cb) => {
+    cb?.({ ok: true, rooms: manager.listSummaries() });
+  });
+
   socket.on('create-room', ({ name, clientId }, cb) => {
     try {
       const room = manager.createRoom();
@@ -150,12 +155,39 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('update-tiebreak-guess', ({ words }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.updateTiebreakGuess(s.playerId, words);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('lock-tiebreak-guess', (_, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.lockTiebreakGuess(s.playerId);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
   socket.on('play-again', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
     if (room.hostId !== s.playerId) return cb?.({ error: 'Только хост может начать новую игру' });
     const res = room.playAgain();
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('send-chat', ({ text }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.sendMessage(s.playerId, text);
     cb?.(res);
     if (res.ok) broadcastRoom(room);
   });
@@ -211,6 +243,21 @@ function handleDisconnect(socket) {
 }
 
 setInterval(() => manager.cleanup(), 1000 * 60 * 10);
+
+// восстановленные из файлов комнаты могли остановиться на фазе результата —
+// доигрываем оставшееся время таймера (или сразу переходим дальше, если
+// пауза уже истекла, пока сервер был выключен)
+for (const room of manager.rooms.values()) {
+  if (room.status === 'playing' && room.phase === 'reveal' && room.revealDeadline) {
+    const remaining = room.revealDeadline - Date.now();
+    if (remaining <= 0) {
+      const res = room.nextRound();
+      if (res.ok) manager.save(room);
+    } else {
+      scheduleRevealAdvance(room, remaining);
+    }
+  }
+}
 
 server.listen(PORT, () => {
   console.log(`Декодер запущен на порту ${PORT}`);

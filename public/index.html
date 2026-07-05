@@ -43,6 +43,8 @@
         </div>
 
         <p id="landing-error" class="error-text" hidden></p>
+
+        <button id="btn-list-rooms" class="btn-link">🌐 Все активные комнаты</button>
       </div>
     </div>
   </section>
@@ -171,19 +173,22 @@
         <p class="hint-text">Следующий раунд начнётся через <span id="next-round-seconds" class="mono">10</span> сек…</p>
       </div>
 
-      <!-- ИСТОРИЯ -->
-      <aside id="history-panel" class="history-panel" hidden>
-        <div class="history-head">
-          <span>История</span>
-          <button id="btn-close-history" class="btn-icon">✕</button>
+      <!-- ФАЗА: тай-брейк (ничья по счёту — угадываем все 4 слова соперника) -->
+      <div id="phase-tiebreak" class="phase-panel">
+        <div class="tiebreak-head">
+          <h3>Ничья! Финальный тай-брейк</h3>
+          <p class="hint-text">Счёт равный — обе команды по памяти пытаются угадать все 4 слова соперника. Кто угадает больше — побеждает.</p>
         </div>
-        <div class="history-tabs">
-          <button class="history-tab active" data-tab="rounds">Раунды</button>
-          <button class="history-tab" data-tab="assoc">Ассоциации</button>
+        <div id="tiebreak-form-wrap">
+          <div class="tiebreak-inputs" id="tiebreak-inputs"></div>
+          <button id="btn-submit-tiebreak" class="btn btn-primary">Подтвердить слова</button>
         </div>
-        <div id="history-content" class="history-content"></div>
-        <div id="assoc-content" class="history-content" hidden></div>
-      </aside>
+        <div id="tiebreak-waiting" class="waiting-view" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <p>Ждём ответ соперника…</p>
+        </div>
+        <div id="tiebreak-result" class="tiebreak-result" hidden></div>
+      </div>
 
     </div>
   </section>
@@ -194,10 +199,76 @@
       <div class="brand-mark large">◈</div>
       <h2 id="finished-title">Игра окончена</h2>
       <p id="finished-reason" class="tagline"></p>
+      <button id="btn-toggle-history-finished" class="btn btn-secondary">📜 История раундов</button>
       <button id="btn-play-again" class="btn btn-primary btn-large">Играть ещё раз</button>
       <p id="finished-wait-hint" class="hint-text" hidden>Ждём хоста…</p>
     </div>
+
+    <!-- слова и ассоциации по раундам — видно сразу, без переключателей -->
+    <div id="finished-report" class="finished-report">
+      <div class="finished-report-section">
+        <div class="finished-report-title">🔤 Ассоциации</div>
+        <div id="finished-assoc-content" class="history-content"></div>
+      </div>
+    </div>
   </section>
+
+  <!-- СПИСОК КОМНАТ — доступен только с экрана входа, до создания/входа в комнату -->
+  <aside id="rooms-panel" class="history-panel" hidden>
+    <div class="history-head">
+      <span>Активные комнаты</span>
+      <button id="btn-close-rooms" class="btn-icon">✕</button>
+    </div>
+    <div id="rooms-list" class="rooms-list"></div>
+  </aside>
+
+  <!-- ПРОШЛЫЕ ИГРЫ В ЭТОЙ КОМНАТЕ — доступно на любом экране внутри комнаты -->
+  <button id="btn-toggle-games" class="chat-toggle-btn games-toggle-btn" hidden title="Прошлые игры в этой комнате">🗂</button>
+  <aside id="games-panel" class="history-panel games-panel" hidden>
+    <div class="history-head">
+      <span>Прошлые игры в комнате</span>
+      <button id="btn-close-games" class="btn-icon">✕</button>
+    </div>
+    <div id="games-list-content" class="history-content"></div>
+    <div id="games-detail-content" class="history-content" hidden>
+      <button id="btn-games-back" class="games-detail-back">← Ко всем играм</button>
+      <div id="games-detail-title" class="assoc-block-title"></div>
+      <div id="games-detail-history"></div>
+      <div id="games-detail-assoc"></div>
+    </div>
+  </aside>
+
+  <!-- ИСТОРИЯ — общая для экрана игры и экрана финала -->
+  <aside id="history-panel" class="history-panel" hidden>
+    <div class="history-head">
+      <span>История</span>
+      <button id="btn-close-history" class="btn-icon">✕</button>
+    </div>
+    <div class="history-tabs">
+      <button class="history-tab active" data-tab="rounds">Раунды</button>
+      <button class="history-tab" data-tab="assoc">Ассоциации</button>
+    </div>
+    <div id="history-content" class="history-content"></div>
+    <div id="assoc-content" class="history-content" hidden></div>
+  </aside>
+
+  <!-- ЧАТ — общий для всей комнаты (лобби/игра/финал) -->
+  <button id="btn-toggle-chat" class="chat-toggle-btn" hidden>
+    💬
+    <span id="chat-unread-badge" class="chat-badge" hidden>0</span>
+  </button>
+
+  <aside id="chat-panel" class="chat-panel" hidden>
+    <div class="chat-head">
+      <span>Чат комнаты</span>
+      <button id="btn-close-chat" class="btn-icon">✕</button>
+    </div>
+    <div id="chat-messages" class="chat-messages"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" type="text" maxlength="300" placeholder="Написать сообщение…" autocomplete="off">
+      <button type="submit" class="btn btn-primary chat-send-btn">➤</button>
+    </form>
+  </aside>
 
 </div>
 

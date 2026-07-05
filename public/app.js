@@ -5,6 +5,8 @@
     myId: null,
     lastView: null,
     historyOpen: false,
+    chatOpen: false,
+    gamesOpen: false,
   };
 
   // ---------- утилиты ----------
@@ -64,13 +66,13 @@
   }
 
   const urlRoomCodeEarly = new URLSearchParams(location.search).get('room');
-  let storedRoomCode = null;
-  try { storedRoomCode = localStorage.getItem('decoder_room_code'); } catch (e) {}
-  // текущий известный код комнаты — обновляется на каждый room-update
-  // (не застывший снимок), чтобы переподключение сокета после сетевого
-  // сбоя всегда пыталось восстановиться именно в АКТУАЛЬНОЙ комнате,
-  // а не в той, что была на момент загрузки страницы
-  let currentRoomCode = (urlRoomCodeEarly ? urlRoomCodeEarly.toUpperCase() : null) || storedRoomCode;
+  // код комнаты берём ТОЛЬКО из адреса страницы, не из localStorage — иначе
+  // голый localhost:3000 (без ?room=) в браузере, где раньше уже была игра,
+  // всегда перекидывал бы на неё вместо экрана входа. Кэш в localStorage
+  // остаётся нужен только для мгновенной отрисовки при обычной перезагрузке
+  // той же ?room=CODE страницы и для переподключения сокета в рамках уже
+  // открытой вкладки (см. currentRoomCode = view.code в applyRoomUpdate)
+  let currentRoomCode = urlRoomCodeEarly ? urlRoomCodeEarly.toUpperCase() : null;
 
   socket.on('connect', () => {
     state.myId = socket.id;
@@ -80,6 +82,14 @@
           currentRoomCode = null;
           clearRoomCache();
           history.replaceState(null, '', location.pathname);
+          // комнаты, чей чат мы оптимистично отрисовали из кэша, на самом
+          // деле больше нет — прячем чат обратно, иначе кнопка и старые
+          // сообщения останутся висеть поверх экрана входа
+          state.chatOpen = false;
+          $('#btn-toggle-chat').hidden = true;
+          $('#chat-panel').hidden = true;
+          $('#btn-toggle-games').hidden = true;
+          $('#games-panel').hidden = true;
           showScreen('landing');
         }
       });
@@ -153,6 +163,40 @@
     if (res.error) return showError(landingError, res.error);
   });
 
+  // ---------- список активных комнат (доступен только до входа в свою) ----------
+  const STATUS_LABELS = { lobby: 'лобби', playing: 'игра идёт', finished: 'завершена' };
+
+  function renderRoomsList(rooms) {
+    const list = $('#rooms-list');
+    if (!rooms.length) {
+      list.innerHTML = '<p class="hint-text">Сейчас нет активных комнат</p>';
+      return;
+    }
+    list.innerHTML = rooms.map(r => `
+      <button class="room-item" data-code="${r.code}">
+        <span class="room-item-code mono">${r.code}</span>
+        <span class="room-item-meta">${r.playerCount} игрок(ов)${r.hostName ? ' · хост ' + escapeHtml(r.hostName) : ''}${r.status === 'playing' ? ' · раунд ' + r.round : ''}</span>
+        <span class="room-item-status">${STATUS_LABELS[r.status] || r.status}</span>
+      </button>
+    `).join('');
+    $all('.room-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        roomCodeInput.value = btn.dataset.code;
+        $('#rooms-panel').hidden = true;
+        $('#btn-join').click();
+      });
+    });
+  }
+
+  $('#btn-list-rooms').addEventListener('click', async () => {
+    const res = await emit('list-rooms', {});
+    renderRoomsList(res.rooms || []);
+    $('#rooms-panel').hidden = false;
+  });
+  $('#btn-close-rooms').addEventListener('click', () => {
+    $('#rooms-panel').hidden = true;
+  });
+
   // ---------- ЭКРАН: лобби ----------
   $('#btn-copy-link').addEventListener('click', () => {
     const code = state.lastView?.code;
@@ -171,6 +215,11 @@
     clearRoomCache();
     history.replaceState(null, '', location.pathname);
     state.lastView = null;
+    state.chatOpen = false;
+    $('#btn-toggle-chat').hidden = true;
+    $('#chat-panel').hidden = true;
+    $('#btn-toggle-games').hidden = true;
+    $('#games-panel').hidden = true;
     showScreen('landing');
   }
   $('#btn-leave-lobby').addEventListener('click', leaveRoom);
@@ -233,6 +282,7 @@
   let ownGuessDraft = [null, null, null];
   let interceptGuessDraft = [null, null, null];
   let clueInputsRound = null; // раунд, для которого сейчас отрисованы поля подсказок
+  let tiebreakInputsBuilt = false; // построены ли уже 4 поля ввода тай-брейка
 
   let clueTimerInterval = null;
 
@@ -313,6 +363,9 @@
       $('#phase-reveal').classList.add('active');
       renderReveal(view, tv);
       startRevealTimer(view.revealDeadline);
+    } else if (view.phase === 'tiebreak') {
+      $('#phase-tiebreak').classList.add('active');
+      renderTiebreak(view, tv);
     }
 
     updatePauseBanner(view, tv);
@@ -470,25 +523,28 @@
     board.innerHTML = order.map((key) => {
       const r = byKey[key];
       const isLoneCard = view.loneTeam === key;
+      // справа от названия команды ничего не показываем — только сам ход
+      // (цифры хода) и цвет говорят, угадали или нет; никаких «?»
       const head = `
         <div class="reveal-head">
           <span class="team-dot"></span>
           <strong>Команда ${key === 'A' ? 'А' : 'Б'}</strong>
-          <span class="reveal-code-display mono">${r.code ? r.code.join('-') : (isLoneCard ? '—' : '?-?-?')}</span>
         </div>
       `;
 
       if (isLoneCard) {
         // соло-команда не загадывает код — единственный итог для неё:
-        // удался ли перехват кода соперника
+        // её собственная попытка перехватить код соперника
         const otherKey = key === 'A' ? 'B' : 'A';
-        const intercepted = byKey[otherKey] ? byKey[otherKey].interceptCorrect : false;
+        const otherR = byKey[otherKey];
+        const intercepted = otherR ? otherR.interceptCorrect : false;
+        const guess = otherR ? otherR.interceptGuess : null;
         return `
           <div class="reveal-team team-${key.toLowerCase()}">
             ${head}
             <div class="reveal-line">
               <span class="reveal-line-label">Перехват кода соперника</span>
-              <span class="reveal-verdict ${intercepted ? 'tag-ok' : 'tag-fail'}">${intercepted ? '🎯 Удался' : '❌ Не удался'}</span>
+              <span class="digit-row">${guess ? digitChips(guess, intercepted) : ''}</span>
             </div>
           </div>
         `;
@@ -498,7 +554,6 @@
         <div class="reveal-line">
           <span class="reveal-line-label">Перехват соперника</span>
           <span class="digit-row">${digitChips(r.interceptGuess, r.interceptCorrect)}</span>
-          <span class="reveal-verdict ${r.interceptCorrect ? 'tag-fail' : 'tag-ok'}">${r.interceptCorrect ? 'Удался' : 'Не удался'}</span>
         </div>
       `;
 
@@ -508,7 +563,6 @@
           <div class="reveal-line">
             <span class="reveal-line-label">Своя расшифровка</span>
             <span class="digit-row">${digitChips(r.ownGuess, r.ownCorrect)}</span>
-            <span class="reveal-verdict ${r.ownCorrect ? 'tag-ok' : 'tag-fail'}">${r.ownCorrect ? 'Верно' : 'Ошибка'}</span>
           </div>
           ${interceptLine}
         </div>
@@ -536,7 +590,124 @@
     revealTimerInterval = setInterval(tick, 250);
   }
 
-  function renderHistory(view, tv) {
+  // тай-брейк: счёт равный даже по основным условиям — обе команды по
+  // памяти пытаются угадать все 4 слова соперника (не порядок, а сами слова)
+  function renderTiebreak(view, tv) {
+    if (!tv.tiebreak) return;
+    const oppTeamKey = tv.myTeamKey === 'A' ? 'B' : 'A';
+    const tb = tv.tiebreak;
+
+    const formWrap = $('#tiebreak-form-wrap');
+    const waiting = $('#tiebreak-waiting');
+    const resultEl = $('#tiebreak-result');
+
+    if (tb.result) {
+      formWrap.hidden = true;
+      waiting.hidden = true;
+      resultEl.hidden = false;
+      const myScore = tb.result[tv.myTeamKey];
+      const oppScore = tb.result[oppTeamKey];
+      resultEl.innerHTML = `
+        <div class="tiebreak-scores">
+          <div class="tiebreak-score-line">Ваша команда угадала: <strong>${myScore} из 4</strong></div>
+          <div class="tiebreak-score-line">Соперник угадал: <strong>${oppScore} из 4</strong></div>
+        </div>
+        <div class="tiebreak-words">
+          <div class="field-label">Слова соперника были:</div>
+          <div class="tiebreak-word-chips">${(tb.oppWords || []).map(w => `<span class="tiebreak-word-chip">${escapeHtml(w)}</span>`).join('')}</div>
+        </div>
+      `;
+      tiebreakInputsBuilt = false; // на случай нового тай-брейка в будущей игре
+      return;
+    }
+
+    resultEl.hidden = true;
+
+    if (tb.myLocked) {
+      formWrap.hidden = true;
+      waiting.hidden = false;
+      return;
+    }
+
+    formWrap.hidden = false;
+    waiting.hidden = true;
+
+    if (!tiebreakInputsBuilt) {
+      $('#tiebreak-inputs').innerHTML = [0, 1, 2, 3].map(i => `
+        <input type="text" class="tiebreak-input" maxlength="30" data-idx="${i}"
+          placeholder="Слово соперника №${i + 1}" autocomplete="off"
+          value="${escapeHtml(tb.myGuess?.[i] || '')}">
+      `).join('');
+      $all('.tiebreak-input').forEach(inp => {
+        inp.addEventListener('input', async () => {
+          const words = $all('.tiebreak-input').map(el => el.value);
+          await emit('update-tiebreak-guess', { words });
+        });
+      });
+      tiebreakInputsBuilt = true;
+    }
+
+    // черновик общий на команду — подтягиваем то, что напечатали товарищи
+    // по команде, но не трогаем поле, в которое сейчас печатает сам игрок
+    // (иначе перебьём ввод и собьём позицию курсора)
+    $all('.tiebreak-input').forEach((inp, i) => {
+      if (document.activeElement === inp) return;
+      const val = tb.myGuess?.[i] || '';
+      if (inp.value !== val) inp.value = val;
+    });
+  }
+
+  $('#btn-submit-tiebreak').addEventListener('click', async () => {
+    const res = await emit('lock-tiebreak-guess');
+    if (res.error) alert(res.error);
+  });
+
+  // раскрашивает угаданные в тай-брейке слова: зелёный, если слово реально
+  // есть среди настоящих слов соперника (без повторного зачёта одного и
+  // того же слова дважды), иначе красный
+  function wordChips(guessWords, actualWords) {
+    const pool = (actualWords || []).map(w => w.toLowerCase());
+    return (guessWords || []).map(w => {
+      const idx = pool.indexOf((w || '').toLowerCase());
+      const match = idx !== -1;
+      if (match) pool.splice(idx, 1);
+      return `<span class="tiebreak-word-chip ${match ? 'match' : 'miss'}">${escapeHtml(w || '—')}</span>`;
+    }).join('');
+  }
+
+  // тай-брейк — тоже раунд для истории: показываем, какие слова
+  // соперника угадывала наша команда и какие наши слова угадывал соперник
+  function renderTiebreakHistoryBlock(view, tv) {
+    const tb = tv.tiebreak;
+    if (!tb || !tb.result) return '';
+    const oppTeamKey = tv.myTeamKey === 'A' ? 'B' : 'A';
+    return `
+      <div class="history-round">
+        <div class="h-round-num">Тай-брейк</div>
+        <div class="h-team-block team-${tv.myTeamKey.toLowerCase()}">
+          <div class="h-team-head">
+            <span class="team-dot"></span>
+            <span>Команда ${tv.myTeamKey === 'A' ? 'А' : 'Б'}</span>
+          </div>
+          <div class="h-clues">Угадывали слова команды ${oppTeamKey === 'A' ? 'А' : 'Б'}</div>
+          <div class="tiebreak-word-chips">${wordChips(tb.myGuess, tb.oppWords)}</div>
+        </div>
+        <div class="h-team-block team-${oppTeamKey.toLowerCase()}">
+          <div class="h-team-head">
+            <span class="team-dot"></span>
+            <span>Команда ${oppTeamKey === 'A' ? 'А' : 'Б'}</span>
+          </div>
+          <div class="h-clues">Угадывали слова команды ${tv.myTeamKey === 'A' ? 'А' : 'Б'}</div>
+          <div class="tiebreak-word-chips">${wordChips(tb.oppGuess, tv.myWords)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // история раундов: только реальный ход команды (её догадка) и цвет —
+  // без текстовых пометок «ошибка/успех» и без символов «?», цвет чипа сам
+  // по себе говорит, угадали или нет
+  function renderHistory(view, tv, targetSelector = '#history-content') {
     const oppTeamKey = tv.myTeamKey === 'A' ? 'B' : 'A';
     const byRound = new Map();
     (tv.history.mine || []).forEach(h => {
@@ -550,40 +721,51 @@
 
     const rounds = [...byRound.entries()].sort((a, b) => b[0] - a[0]);
 
-    $('#history-content').innerHTML = rounds.map(([roundNum, teams]) => `
+    // тай-брейк случается после всех обычных раундов — показываем его
+    // первым (сверху), как самое недавнее событие
+    const tiebreakHtml = renderTiebreakHistoryBlock(view, tv);
+
+    $(targetSelector).innerHTML = tiebreakHtml + (rounds.map(([roundNum, teams]) => `
       <div class="history-round">
         <div class="h-round-num">Раунд ${roundNum}</div>
         ${[tv.myTeamKey, oppTeamKey].map((key) => {
           const h = teams[key];
           if (!h) return '';
-          // interceptCorrect в СВОЕЙ истории команды означает «нас перехватили»;
-          // чтобы показать «мы перехватили», берём эту же отметку из истории
-          // команды-соперника за тот же раунд (там она означает «эта команда
-          // была перехвачена нами»)
           const otherKey = key === 'A' ? 'B' : 'A';
-          const weIntercepted = teams[otherKey] ? teams[otherKey].interceptCorrect : false;
+          const otherH = teams[otherKey];
+          // interceptGuess/interceptCorrect в истории КОМАНДЫ-ПРОТИВНИКА (otherH)
+          // на самом деле хранят попытку ЭТОЙ команды (key) перехватить otherKey —
+          // так мы получаем «наш» перехват из «их» записи за тот же раунд
+          const weIntercepted = otherH ? otherH.interceptCorrect : false;
+          const interceptGuess = otherH ? otherH.interceptGuess : null;
           const isLoneTeam = view.loneTeam === key;
           // у команды из двух, если соперник — соло-игрок, перехватывать
           // нечего (у соло нет кода) — эта строка для неё бессмысленна
           const isDuoVsSoloOpponent = view.loneTeam && !isLoneTeam;
-          const codeDisplay = h.code ? h.code.join('-') : (isLoneTeam ? '—' : '?-?-?');
           return `
             <div class="h-team-block team-${key.toLowerCase()}">
               <div class="h-team-head">
                 <span class="team-dot"></span>
                 <span>Команда ${key === 'A' ? 'А' : 'Б'}</span>
-                <span class="mono h-code">${codeDisplay}</span>
               </div>
               ${isLoneTeam ? '' : `<div class="h-clues">${(h.clues || []).map(escapeHtml).join(' · ')}</div>`}
-              <div class="h-verdicts">
-                ${isLoneTeam ? '' : `<span class="${h.ownCorrect ? 'tag-ok' : 'tag-fail'}">${h.ownCorrect ? '✅ своя верна' : '❌ своя ошибочна'}</span>`}
-                ${isDuoVsSoloOpponent ? '' : `<span class="${weIntercepted ? 'tag-ok' : 'tag-fail'}">${weIntercepted ? '🎯 перехват удался' : '❌ перехват не удался'}</span>`}
-              </div>
+              ${isLoneTeam ? '' : `
+                <div class="h-line">
+                  <span class="h-line-label">Своя расшифровка</span>
+                  <span class="digit-row">${digitChips(h.ownGuess, h.ownCorrect)}</span>
+                </div>
+              `}
+              ${isDuoVsSoloOpponent ? '' : `
+                <div class="h-line">
+                  <span class="h-line-label">Перехват соперника</span>
+                  <span class="digit-row">${interceptGuess ? digitChips(interceptGuess, weIntercepted) : '<span class="assoc-empty">—</span>'}</span>
+                </div>
+              `}
             </div>
           `;
         }).join('')}
       </div>
-    `).join('') || '<p class="hint-text">Пока нет истории</p>';
+    `).join('')) || '<p class="hint-text">Пока нет истории</p>';
   }
 
   // строит по раундам таблицу «какая подсказка соответствовала какому слову»:
@@ -616,19 +798,54 @@
     `;
   }
 
-  function renderAssocTables(view, tv) {
+  // группирует историю по СЛОВУ (а не по раунду): для каждого из 4 слов —
+  // список подсказок, которые к нему давали, по всем сыгранным раундам
+  function buildWordAssoc(history, words) {
+    const perWord = words.map((word, i) => ({ slot: i + 1, word, entries: [] }));
+    [...history].sort((a, b) => a.round - b.round).forEach(h => {
+      if (!h.code) return;
+      h.code.forEach((wordNum, i) => {
+        perWord[wordNum - 1].entries.push({ round: h.round, clue: h.clues[i] });
+      });
+    });
+    return perWord;
+  }
+
+  // слово в рамке (как на игровом экране) + все ассоциации к нему снизу,
+  // без номеров раундов — просто список всех подсказок, что к нему давали
+  function renderWordAssocCards(words, history) {
+    if (!words || !words.length) return '<p class="hint-text">Нет слов</p>';
+    const perWord = buildWordAssoc(history, words);
+    return `
+      <div class="assoc-word-grid">
+        ${perWord.map(w => `
+          <div class="assoc-word-card">
+            <div class="assoc-word-title">${escapeHtml(w.word)}</div>
+            <div class="assoc-word-list">
+              ${w.entries.length ? w.entries.map(e => `
+                <div class="assoc-word-entry">${escapeHtml(e.clue)}</div>
+              `).join('') : '<div class="assoc-word-entry assoc-empty">—</div>'}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  // full=true — режим финального экрана: слова уже не секрет, показываем
+  // их в рамке и все ассоциации к ним по всем раундам; иначе (во время
+  // игры) слова соперника ещё неизвестны — остаётся старая таблица по слотам
+  function renderAssocTables(view, tv, targetSelector = '#assoc-content', full = false) {
     const oppTeamKey = tv.myTeamKey === 'A' ? 'B' : 'A';
-    const mineRows = buildAssocRows(tv.history.mine || []);
-    const oppRows = buildAssocRows(tv.history.opponent || []);
 
     const mineSection = view.loneTeam === tv.myTeamKey
       ? '<p class="hint-text">Ваша команда не загадывает слова</p>'
-      : renderAssocTable(mineRows);
+      : (full ? renderWordAssocCards(tv.myWords, tv.history.mine || []) : renderAssocTable(buildAssocRows(tv.history.mine || [])));
     const oppSection = view.loneTeam === oppTeamKey
       ? '<p class="hint-text">У соперника нет своих слов</p>'
-      : renderAssocTable(oppRows);
+      : (full ? renderWordAssocCards(tv.oppWords, tv.history.opponent || []) : renderAssocTable(buildAssocRows(tv.history.opponent || [])));
 
-    $('#assoc-content').innerHTML = `
+    $(targetSelector).innerHTML = `
       <div class="assoc-block">
         <div class="assoc-block-title">Ваши слова</div>
         ${mineSection}
@@ -649,19 +866,104 @@
     });
   });
 
-  $('#btn-toggle-history').addEventListener('click', () => {
+  function toggleHistoryPanel() {
     state.historyOpen = !state.historyOpen;
     $('#history-panel').hidden = !state.historyOpen;
-  });
+  }
+  $('#btn-toggle-history').addEventListener('click', toggleHistoryPanel);
+  $('#btn-toggle-history-finished').addEventListener('click', toggleHistoryPanel);
   $('#btn-close-history').addEventListener('click', () => {
     state.historyOpen = false;
     $('#history-panel').hidden = true;
   });
 
+  // ---------- ПРОШЛЫЕ ИГРЫ В КОМНАТЕ ----------
+  // законченные партии больше не секрет ни для кого в комнате, поэтому
+  // просто пересобираем их в форму teamView/view, которую уже умеют
+  // рисовать renderHistory/renderAssocTables — с точки зрения команды
+  // текущего игрока (а если он не в команде — с точки зрения А)
+  function buildPastGameTv(game, perspectiveTeam) {
+    const otherTeam = perspectiveTeam === 'A' ? 'B' : 'A';
+    const myTeam = game.teams[perspectiveTeam];
+    const oppTeam = game.teams[otherTeam];
+    const tb = game.tiebreak;
+    return {
+      myTeamKey: perspectiveTeam,
+      myWords: myTeam.words,
+      oppWords: oppTeam.words,
+      history: { mine: myTeam.history, opponent: oppTeam.history },
+      tiebreak: (tb && tb.result) ? {
+        myGuess: tb.guesses[perspectiveTeam],
+        oppGuess: tb.guesses[otherTeam],
+        result: tb.result,
+        oppWords: oppTeam.words,
+      } : null,
+    };
+  }
+
+  function renderGamesList(view) {
+    const games = view.pastGames || [];
+    $('#games-list-content').hidden = false;
+    $('#games-detail-content').hidden = true;
+    if (!games.length) {
+      $('#games-list-content').innerHTML = '<p class="hint-text">В этой комнате пока не было завершённых игр</p>';
+      return;
+    }
+    $('#games-list-content').innerHTML = [...games].reverse().map(g => {
+      const isDraw = g.winner === 'draw';
+      const title = isDraw ? 'Ничья' : `Победа команды ${g.winner === 'A' ? 'А' : 'Б'}`;
+      const when = new Date(g.finishedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return `
+        <button class="games-list-item" data-game="${g.gameNumber}">
+          <span class="games-item-title">Игра ${g.gameNumber} — ${title}</span>
+          <span class="games-item-reason">${escapeHtml(g.winReason || '')} · ${when}</span>
+        </button>
+      `;
+    }).join('');
+    $all('.games-list-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const game = games.find(g => g.gameNumber === Number(btn.dataset.game));
+        if (game) renderGameDetail(view, game);
+      });
+    });
+  }
+
+  function renderGameDetail(view, game) {
+    const perspectiveTeam = (view.me && view.me.team) || 'A';
+    const pastTv = buildPastGameTv(game, perspectiveTeam);
+    const pastView = { loneTeam: game.loneTeam };
+
+    $('#games-list-content').hidden = true;
+    $('#games-detail-content').hidden = false;
+    const isDraw = game.winner === 'draw';
+    const title = isDraw ? 'Ничья' : `Победа команды ${game.winner === 'A' ? 'А' : 'Б'}`;
+    $('#games-detail-title').textContent = `Игра ${game.gameNumber} — ${title}`;
+    renderHistory(pastView, pastTv, '#games-detail-history');
+    renderAssocTables(pastView, pastTv, '#games-detail-assoc', true);
+  }
+
+  $('#btn-games-back').addEventListener('click', () => {
+    $('#games-list-content').hidden = false;
+    $('#games-detail-content').hidden = true;
+  });
+
+  $('#btn-toggle-games').addEventListener('click', () => {
+    state.gamesOpen = !state.gamesOpen;
+    $('#games-panel').hidden = !state.gamesOpen;
+    if (state.gamesOpen && state.lastView) renderGamesList(state.lastView);
+  });
+  $('#btn-close-games').addEventListener('click', () => {
+    state.gamesOpen = false;
+    $('#games-panel').hidden = true;
+  });
+
   // ---------- ЭКРАН: конец игры ----------
   function renderFinished(view) {
-    const won = view.me?.team && view.winner === view.me.team;
-    $('#finished-title').textContent = won ? 'Победа! 🎉' : (view.me?.team ? 'Поражение' : 'Игра окончена');
+    const isDraw = view.winner === 'draw';
+    const won = !isDraw && view.me?.team && view.winner === view.me.team;
+    $('#finished-title').textContent = isDraw
+      ? 'Ничья! 🤝'
+      : won ? 'Победа! 🎉' : (view.me?.team ? 'Поражение' : 'Игра окончена');
     $('#finished-reason').textContent = view.winReason || '';
     const isHost = view.me?.isHost;
     $('#btn-play-again').hidden = !isHost;
@@ -671,6 +973,17 @@
       $('#finished-wait-hint').textContent = (host && !host.connected)
         ? `Ждём хоста (${host.name}) — потерял соединение…`
         : 'Ждём хоста…';
+    }
+    // игра закончилась — сразу показываем таблицы ассоциаций (свои слова и
+    // слова соперника), а историю раундов — по кнопке, в том же боковом
+    // окне, что и во время игры
+    const tv = view.teamView;
+    $('#finished-report').hidden = !tv;
+    $('#btn-toggle-history-finished').hidden = !tv;
+    if (tv) {
+      renderAssocTables(view, tv, '#finished-assoc-content', true);
+      renderHistory(view, tv);
+      renderAssocTables(view, tv);
     }
   }
 
@@ -686,7 +999,13 @@
     saveRoomCache(view);
     history.replaceState(null, '', `${location.pathname}?room=${view.code}`);
     updateLeaveButtons(view);
+    $('#btn-toggle-chat').hidden = false;
+    renderChat(view);
+    $('#btn-toggle-games').hidden = !(view.pastGames && view.pastGames.length);
+    if (state.gamesOpen) renderGamesList(view);
     if (view.status === 'lobby') {
+      state.historyOpen = false;
+      $('#history-panel').hidden = true;
       showScreen('lobby');
       renderLobby(view);
     } else if (view.status === 'playing') {
@@ -698,6 +1017,72 @@
     }
   }
   socket.on('room-update', applyRoomUpdate);
+
+  // ---------- ЧАТ ----------
+  let chatUnread = 0;
+  let lastRenderedChatLen = 0;
+
+  function updateChatBadge() {
+    const badge = $('#chat-unread-badge');
+    badge.hidden = chatUnread <= 0;
+    badge.textContent = chatUnread > 9 ? '9+' : String(chatUnread);
+  }
+
+  function renderChat(view) {
+    const chat = view.chat || [];
+    const list = $('#chat-messages');
+    const wasAtBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 20;
+
+    list.innerHTML = chat.map(m => {
+      const mine = m.playerId === clientId;
+      const teamClass = m.team ? `team-${m.team.toLowerCase()}` : '';
+      return `
+        <div class="chat-msg ${mine ? 'mine' : ''} ${teamClass}">
+          <span class="chat-msg-name">${escapeHtml(m.name)}</span>
+          <span class="chat-msg-text">${escapeHtml(m.text)}</span>
+        </div>
+      `;
+    }).join('') || '<p class="hint-text">Пока никто ничего не написал</p>';
+
+    if (chat.length > lastRenderedChatLen) {
+      const newMessages = chat.slice(lastRenderedChatLen);
+      const incomingCount = newMessages.filter(m => m.playerId !== clientId).length;
+      if (incomingCount && !state.chatOpen) {
+        chatUnread += incomingCount;
+        updateChatBadge();
+      }
+    }
+    lastRenderedChatLen = chat.length;
+
+    if (state.chatOpen || wasAtBottom) {
+      list.scrollTop = list.scrollHeight;
+    }
+  }
+
+  $('#btn-toggle-chat').addEventListener('click', () => {
+    state.chatOpen = !state.chatOpen;
+    $('#chat-panel').hidden = !state.chatOpen;
+    if (state.chatOpen) {
+      chatUnread = 0;
+      updateChatBadge();
+      const list = $('#chat-messages');
+      list.scrollTop = list.scrollHeight;
+    }
+  });
+  $('#btn-close-chat').addEventListener('click', () => {
+    state.chatOpen = false;
+    $('#chat-panel').hidden = true;
+  });
+
+  $('#chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = $('#chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    const res = await emit('send-chat', { text });
+    if (res.error) alert(res.error);
+  });
 
   // отрисовать закэшированный вид комнаты сразу, не дожидаясь ответа сервера
   // (чтобы при перезагрузке страницы не было пустого экрана) — обязательно
