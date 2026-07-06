@@ -7,6 +7,8 @@ const { RoomManager } = require('./game');
 // у будущих типов игр может не быть такой фазы вовсе — это нормально,
 // проверка на room.game.phase === 'reveal' ниже просто не сработает для них
 const { REVEAL_TIME_MS } = require('./games/decoder');
+const { CITIES, ROUTES } = require('./games/ttr/map');
+const { TRAIN_COLORS } = require('./games/ttr/rules');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,6 +21,12 @@ const manager = new RoomManager();
 const DISCONNECT_GRACE_MS = 25 * 1000;
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// статичные данные карты TTR (города/маршруты/цвета карт) — не зависят от
+// конкретной комнаты, клиент запрашивает их один раз и кэширует
+app.get('/api/ttr/map', (req, res) => {
+  res.json({ cities: CITIES, routes: ROUTES, trainColors: TRAIN_COLORS });
+});
 
 // socket.id -> { roomCode, playerId }
 const sessions = new Map();
@@ -182,6 +190,62 @@ io.on('connection', (socket) => {
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
     const res = room.lockTiebreakGuess(s.playerId);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  // --- Ticket to Ride ---
+  socket.on('draw-card', ({ source }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.drawCard(s.playerId, source);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('claim-route', ({ routeId, payment }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.claimRoute(s.playerId, routeId, payment);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('resolve-tunnel', ({ decision }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.resolveTunnel(s.playerId, decision);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('draw-tickets', (_, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.drawTickets(s.playerId);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('choose-tickets', ({ keepIndices }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.chooseTickets(s.playerId, keepIndices);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('force-end-game', (_, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    if (room.hostId !== s.playerId) return cb?.({ error: 'Только хост может завершить игру' });
+    const res = room.forceEndGame();
     cb?.(res);
     if (res.ok) broadcastRoom(room);
   });

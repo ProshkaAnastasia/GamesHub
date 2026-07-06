@@ -64,28 +64,31 @@
 
       <div class="field-label">Вид игры</div>
       <div id="game-type-picker" class="game-type-picker"></div>
+      <p id="game-type-pending-hint" class="hint-text" hidden></p>
 
-      <div class="teams-grid">
-        <div class="team-column team-a">
-          <div class="team-heading">
-            <span class="team-dot"></span> Команда А
+      <div id="teams-section" hidden>
+        <div class="teams-grid">
+          <div class="team-column team-a">
+            <div class="team-heading">
+              <span class="team-dot"></span> Команда А
+            </div>
+            <ul id="team-a-list" class="player-list"></ul>
+            <button class="btn btn-join-team" data-team="A">Встать в команду А</button>
           </div>
-          <ul id="team-a-list" class="player-list"></ul>
-          <button class="btn btn-join-team" data-team="A">Встать в команду А</button>
+
+          <div class="team-column team-b">
+            <div class="team-heading">
+              <span class="team-dot"></span> Команда Б
+            </div>
+            <ul id="team-b-list" class="player-list"></ul>
+            <button class="btn btn-join-team" data-team="B">Встать в команду Б</button>
+          </div>
         </div>
 
-        <div class="team-column team-b">
-          <div class="team-heading">
-            <span class="team-dot"></span> Команда Б
-          </div>
-          <ul id="team-b-list" class="player-list"></ul>
-          <button class="btn btn-join-team" data-team="B">Встать в команду Б</button>
+        <div id="unassigned-wrap" class="unassigned-wrap">
+          <span class="field-label">Ещё не в команде</span>
+          <ul id="unassigned-list" class="player-list inline"></ul>
         </div>
-      </div>
-
-      <div id="unassigned-wrap" class="unassigned-wrap">
-        <span class="field-label">Ещё не в команде</span>
-        <ul id="unassigned-list" class="player-list inline"></ul>
       </div>
 
       <button id="btn-start-game" class="btn btn-primary btn-large" disabled>Начать игру</button>
@@ -110,6 +113,7 @@
         </div>
       </div>
       <button id="btn-toggle-history" class="btn-icon" title="История раундов">📜</button>
+      <button id="btn-force-end-game" class="btn-icon" title="Завершить игру (хост)" hidden>🏁</button>
       <button id="btn-leave-game" class="btn-icon" title="Выйти из комнаты">🚪</button>
     </header>
 
@@ -196,6 +200,86 @@
     </div>
   </section>
 
+  <!-- ЭКРАН 3b: ИГРА (Ticket to Ride) -->
+  <section id="screen-game-ttr" class="screen">
+    <header class="topbar game-topbar">
+      <div id="ttr-roster-row" class="roster-row"></div>
+      <button id="btn-force-end-game-ttr" class="btn-icon" title="Завершить игру (хост)" hidden>🏁</button>
+      <button id="btn-leave-game-ttr" class="btn-icon" title="Выйти из комнаты">🚪</button>
+    </header>
+
+    <div class="ttr-wrap">
+      <div id="ttr-turn-indicator" class="ttr-turn-indicator"></div>
+
+      <div class="ttr-map-wrap">
+        <div id="ttr-map-container" class="ttr-map-container">
+          <p class="hint-text">Загрузка карты…</p>
+        </div>
+        <div class="ttr-zoom-controls">
+          <button type="button" id="ttr-zoom-out" class="btn-icon" title="Уменьшить">−</button>
+          <button type="button" id="ttr-zoom-reset" class="btn-icon" title="Сбросить масштаб">⤢</button>
+          <button type="button" id="ttr-zoom-in" class="btn-icon" title="Увеличить">+</button>
+        </div>
+      </div>
+
+      <div class="ttr-panel">
+        <div class="ttr-deck-row">
+          <button id="ttr-draw-deck" class="ttr-deck-pile" title="Тянуть из колоды">
+            🂠 <span id="ttr-deck-count">0</span>
+          </button>
+          <div id="ttr-faceup-row" class="ttr-faceup-row"></div>
+          <div class="ttr-discard-pile" title="Сброс">
+            🗑 <span id="ttr-discard-count">0</span>
+          </div>
+        </div>
+
+        <div class="ttr-hand" id="ttr-hand"></div>
+
+        <div class="ttr-tickets-head">
+          <span class="field-label">Мои билеты</span>
+          <button id="btn-ttr-draw-tickets" class="btn btn-secondary btn-small">Взять билеты</button>
+        </div>
+        <div class="ttr-tickets" id="ttr-tickets-list"></div>
+      </div>
+    </div>
+
+    <!-- выбор билетов (стартовый набор или после «Взять билеты») -->
+    <div id="ttr-ticket-picker" class="ttr-overlay" hidden>
+      <div class="ttr-overlay-panel">
+        <h3>Выберите билеты</h3>
+        <p id="ttr-ticket-picker-hint" class="hint-text"></p>
+        <div id="ttr-ticket-picker-list" class="ttr-ticket-picker-list"></div>
+        <button id="btn-ttr-confirm-tickets" class="btn btn-primary btn-large" disabled>Подтвердить</button>
+      </div>
+    </div>
+
+    <!-- оплата маршрута -->
+    <div id="ttr-payment-panel" class="ttr-overlay" hidden>
+      <div class="ttr-overlay-panel">
+        <h3 id="ttr-payment-title"></h3>
+        <div id="ttr-payment-cards" class="ttr-payment-cards"></div>
+        <p id="ttr-payment-status" class="hint-text"></p>
+        <div class="ttr-overlay-actions">
+          <button id="btn-ttr-payment-cancel" class="btn btn-secondary">Отмена</button>
+          <button id="btn-ttr-payment-confirm" class="btn btn-primary" disabled>Построить</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- туннель: карты вскрыты, решаем, доплачивать ли -->
+    <div id="ttr-tunnel-panel" class="ttr-overlay" hidden>
+      <div class="ttr-overlay-panel">
+        <h3>Туннель!</h3>
+        <p id="ttr-tunnel-text"></p>
+        <div id="ttr-tunnel-cards" class="ttr-payment-cards"></div>
+        <div class="ttr-overlay-actions">
+          <button id="btn-ttr-tunnel-decline" class="btn btn-secondary">Отказаться</button>
+          <button id="btn-ttr-tunnel-pay" class="btn btn-primary" disabled>Доплатить</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
   <section id="screen-finished" class="screen">
     <div class="finished-wrap">
@@ -212,6 +296,14 @@
       <div class="finished-report-section">
         <div class="finished-report-title">🔤 Ассоциации</div>
         <div id="finished-assoc-content" class="history-content"></div>
+      </div>
+    </div>
+
+    <!-- итоговые очки TTR — вместо ассоциаций Декодера -->
+    <div id="ttr-finished-report" class="finished-report" hidden>
+      <div class="finished-report-section">
+        <div class="finished-report-title">🚂 Итоговые очки</div>
+        <table id="ttr-finished-scores" class="ttr-score-table"></table>
       </div>
     </div>
   </section>

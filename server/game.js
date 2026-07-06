@@ -20,7 +20,9 @@ class Room {
     this.hostId = null;
     this.players = new Map(); // id -> {id, name, team, connected}
     this.status = 'lobby'; // lobby | playing | finished
-    this.gameType = DEFAULT_GAME_TYPE;
+    // null, пока хост явно не выберет игру — до этого момента состав
+    // команд/цветов настраивать нельзя (см. setTeam/canStart)
+    this.gameType = null;
     // {A: [ids...], B: [ids...]} — порядок выбора команды игроками; переживает
     // «играть ещё раз» (используется для ротации шифровальщика заново
     // каждую партию), формой ключей заведует выбранный игровой модуль
@@ -129,13 +131,15 @@ class Room {
 
   canStart() {
     const Module = this.module;
-    return Module ? Module.canStart(this.teamOrder) : false;
+    // teamOrder — нужен командным играм (Декодер), players — играм без
+    // команд, где просто считается число участников (TTR)
+    return Module ? Module.canStart(this.teamOrder, this.players) : false;
   }
 
   startGame() {
     const Module = this.module;
-    if (!Module) return { error: 'Неизвестный тип игры' };
-    if (!Module.canStart(this.teamOrder)) {
+    if (!Module) return { error: this.gameType ? 'Неизвестный тип игры' : 'Сначала выберите игру' };
+    if (!Module.canStart(this.teamOrder, this.players)) {
       return { error: Module.startRequirementText || 'Недостаточно игроков для этого режима' };
     }
     this.game = Module.create(this.players, this.teamOrder, this.usedWords);
@@ -170,9 +174,27 @@ class Room {
   updateTiebreakGuess(playerId, words) { return this._delegate('updateTiebreakGuess', playerId, words); }
   lockTiebreakGuess(playerId) { return this._delegate('lockTiebreakGuess', playerId); }
 
+  drawCard(playerId, source) { return this._delegate('drawCard', playerId, source); }
+  claimRoute(playerId, routeId, payment) { return this._delegate('claimRoute', playerId, routeId, payment); }
+  resolveTunnel(playerId, decision) { return this._delegate('resolveTunnel', playerId, decision); }
+  drawTickets(playerId) { return this._delegate('drawTickets', playerId); }
+  chooseTickets(playerId, keepIndices) { return this._delegate('chooseTickets', playerId, keepIndices); }
+
   nextRound() {
     if (!this.game) return { error: 'Рано' };
     return this.game.nextRound();
+  }
+
+  // хост может в любой момент прервать текущую партию — работает одинаково
+  // для любого типа игры, т.к. опирается только на общий контракт
+  // (finished/winner/winReason), ничего не зная про конкретные правила
+  forceEndGame() {
+    if (this.status !== 'playing' || !this.game) return { error: 'Сейчас нет активной игры' };
+    this.game.finished = true;
+    this.game.winner = 'draw'; // никто не выиграл — партию прервали, а не доиграли до конца
+    this.game.winReason = 'Игра завершена хостом досрочно';
+    this.status = 'finished';
+    return { ok: true };
   }
 
   playAgain() {
@@ -245,7 +267,10 @@ class Room {
     // пока не переподключатся (клиент делает это автоматически по clientId)
     room.players = new Map((data.players || []).map(p => [p.id, { ...p, connected: false }]));
     room.status = data.status;
-    room.gameType = data.gameType || DEFAULT_GAME_TYPE;
+    // отличаем «явно ещё не выбрана» (null, сохранён этой веткой кода) от
+    // «поля вообще не было» (комнаты, сохранённые до этой фичи) — иначе
+    // null || DEFAULT_GAME_TYPE подставил бы Декодер и обошёл выбор хоста
+    room.gameType = data.gameType !== undefined ? data.gameType : DEFAULT_GAME_TYPE;
     room.teamOrder = data.teamOrder || {};
     room.usedWords = new Set(data.usedWords || []);
     room.chat = data.chat || [];

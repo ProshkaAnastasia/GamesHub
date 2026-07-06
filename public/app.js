@@ -198,11 +198,43 @@
   });
 
   // ---------- ЭКРАН: лобби ----------
-  $('#btn-copy-link').addEventListener('click', () => {
+  // navigator.clipboard требует secure context (https или localhost) — при
+  // заходе по обычному http (например, по IP в локальной сети с телефона,
+  // ровно тот сценарий, для которого эта кнопка и нужна) API просто
+  // отсутствует, и writeText тихо ничего не делает; execCommand('copy')
+  // через временный textarea работает и без secure context
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (e) { /* пробуем запасной способ ниже */ }
+    }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  $('#btn-copy-link').addEventListener('click', async () => {
     const code = state.lastView?.code;
     if (!code) return;
     const url = `${location.origin}${location.pathname}?room=${code}`;
-    navigator.clipboard?.writeText(url).catch(() => {});
+    const btn = $('#btn-copy-link');
+    const ok = await copyTextToClipboard(url);
+    const prevText = btn.textContent;
+    btn.textContent = ok ? '✓' : '✕';
+    setTimeout(() => { btn.textContent = prevText; }, 1200);
   });
 
   async function leaveRoom() {
@@ -224,11 +256,20 @@
   }
   $('#btn-leave-lobby').addEventListener('click', leaveRoom);
   $('#btn-leave-game').addEventListener('click', leaveRoom);
+  $('#btn-leave-game-ttr').addEventListener('click', leaveRoom);
+
+  async function forceEndGame() {
+    if (!confirm('Завершить текущую игру для всех? Победитель не будет определён.')) return;
+    const res = await emit('force-end-game', {});
+    if (res.error) alert(res.error);
+  }
+  $('#btn-force-end-game').addEventListener('click', forceEndGame);
+  $('#btn-force-end-game-ttr').addEventListener('click', forceEndGame);
 
   function updateLeaveButtons(view) {
     const safe = view.canLeaveSafely?.safe !== false;
     const reason = view.canLeaveSafely?.reason;
-    [$('#btn-leave-lobby'), $('#btn-leave-game')].forEach((btn) => {
+    [$('#btn-leave-lobby'), $('#btn-leave-game'), $('#btn-leave-game-ttr')].forEach((btn) => {
       btn.disabled = !safe;
       btn.title = safe ? 'Выйти из комнаты' : reason;
     });
@@ -267,6 +308,26 @@
     $('#lobby-room-code').textContent = view.code;
     renderGameTypePicker(view);
 
+    const isHost = view.me?.isHost;
+    const gameChosen = !!view.gameType;
+    const pendingHint = $('#game-type-pending-hint');
+    const currentModule = (view.availableGameTypes || []).find(t => t.id === view.gameType);
+    const hasTeams = !!(currentModule?.teamKeys?.length);
+    $('#teams-section').hidden = !gameChosen;
+    pendingHint.hidden = gameChosen;
+    if (!gameChosen) {
+      pendingHint.textContent = isHost ? 'Выберите игру, чтобы продолжить' : 'Хост выбирает игру…';
+      $('#btn-start-game').hidden = true;
+      $('#lobby-status').hidden = true;
+      return;
+    }
+    $('#lobby-status').hidden = false;
+    // игры без команд (teamKeys: []), например Ticket to Ride — прячем
+    // блок выбора А/Б, но список игроков всё равно нужен, поэтому
+    // переиспользуем unassigned-list как общий ростер (team у всех так и
+    // остаётся null, никто его в таких играх не выставляет)
+    $('.teams-grid').hidden = !hasTeams;
+
     const byTeam = { A: [], B: [], none: [] };
     view.players.forEach(p => {
       if (p.team === 'A') byTeam.A.push(p);
@@ -288,15 +349,15 @@
     renderList($('#team-a-list'), byTeam.A);
     renderList($('#team-b-list'), byTeam.B);
     renderList($('#unassigned-list'), byTeam.none);
-    $('#unassigned-wrap').hidden = byTeam.none.length === 0;
+    $('#unassigned-wrap .field-label').textContent = hasTeams ? 'Ещё не в команде' : 'Игроки';
+    $('#unassigned-wrap').hidden = hasTeams && byTeam.none.length === 0;
 
     const startBtn = $('#btn-start-game');
-    const isHost = view.me?.isHost;
     startBtn.hidden = !isHost;
     startBtn.disabled = !view.canStart;
     $('#lobby-status').textContent = view.canStart
       ? (isHost ? 'Можно начинать!' : 'Хост может начинать игру')
-      : 'Нужно от 2 до 4 игроков в каждой команде (либо 2 и 1, если играете втроём)';
+      : (currentModule?.startRequirementText || 'Недостаточно игроков');
   }
 
   // ---------- ЭКРАН: игра ----------
@@ -342,6 +403,7 @@
   }
 
   function renderGame(view) {
+    $('#btn-force-end-game').hidden = !view.me?.isHost;
     renderRoster(view);
     $('#round-number').textContent = view.round;
     if (view.scoreboard) {
@@ -980,11 +1042,12 @@
 
   // ---------- ЭКРАН: конец игры ----------
   function renderFinished(view) {
+    const isTtr = view.gameType === 'ttr';
     const isDraw = view.winner === 'draw';
-    const won = !isDraw && view.me?.team && view.winner === view.me.team;
+    const won = isTtr ? (view.winner === view.me?.id) : (!isDraw && view.me?.team && view.winner === view.me.team);
     $('#finished-title').textContent = isDraw
       ? 'Ничья! 🤝'
-      : won ? 'Победа! 🎉' : (view.me?.team ? 'Поражение' : 'Игра окончена');
+      : won ? 'Победа! 🎉' : (isTtr || !view.me?.team ? 'Игра окончена' : 'Поражение');
     $('#finished-reason').textContent = view.winReason || '';
     const isHost = view.me?.isHost;
     $('#btn-play-again').hidden = !isHost;
@@ -995,6 +1058,16 @@
         ? `Ждём хоста (${host.name}) — потерял соединение…`
         : 'Ждём хоста…';
     }
+
+    if (isTtr) {
+      $('#finished-report').hidden = true;
+      $('#btn-toggle-history-finished').hidden = true;
+      $('#ttr-finished-report').hidden = false;
+      renderTtrFinishedScores(view);
+      return;
+    }
+    $('#ttr-finished-report').hidden = true;
+
     // игра закончилась — сразу показываем таблицы ассоциаций (свои слова и
     // слова соперника), а историю раундов — по кнопке, в том же боковом
     // окне, что и во время игры
@@ -1013,6 +1086,523 @@
     if (res.error) alert(res.error);
   });
 
+  // ---------- ЭКРАН: игра (Ticket to Ride) ----------
+  // палитра карт вагонов — цвета сверены с заливками в самом SVG (см. map.js
+  // и CLAUDE.md про #AC7F5E = "white"); отдельная палитра для цвета ИГРОКА
+  // (playerColor), т.к. это две не пересекающиеся шкалы: цвет карты
+  // маршрута — игровые данные, цвет владения — окраска клиента поверх карты
+  const TTR_CARD_HEX = {
+    pink: '#FBB0C7', white: '#AC7F5E', blue: '#0088FF', yellow: '#FFCC00',
+    orange: '#FF8D28', black: '#8E8E93', red: '#FF383C', green: '#34C759',
+    locomotive: '#B980F0',
+  };
+  const TTR_CARD_LABELS = {
+    pink: 'Розовый', white: 'Белый', blue: 'Синий', yellow: 'Жёлтый',
+    orange: 'Оранжевый', black: 'Чёрный', red: 'Красный', green: 'Зелёный',
+    locomotive: 'Локомотив',
+  };
+  const TTR_PLAYER_HEX = { red: '#E5484D', blue: '#0091FF', green: '#30A46C', yellow: '#F5D90A', black: '#495057' };
+  // отдельный ключ (не игровой цвет) — маршрут, который реально соединяет
+  // города одного из МОИХ билетов через мою сеть, красится в этот зелёный
+  // вместо цвета владения, чтобы сразу было видно "билет засчитан"
+  const TTR_TICKET_DONE_KEY = 'ticket-done';
+  const TTR_ROUTE_PAINT_HEX = { ...TTR_PLAYER_HEX, [TTR_TICKET_DONE_KEY]: '#7ce38b' };
+
+  // сдвигает hex-цвет к белому (percent > 0) или к чёрному (percent < 0)
+  function ttrShade(hex, percent) {
+    const num = parseInt(hex.slice(1), 16);
+    const amt = Math.round(2.55 * percent);
+    const r = Math.max(0, Math.min(255, (num >> 16) + amt));
+    const g = Math.max(0, Math.min(255, (num >> 8 & 0xff) + amt));
+    const b = Math.max(0, Math.min(255, (num & 0xff) + amt));
+    return '#' + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+  }
+
+  // градиент + обводка на цвет владения — иначе купленный красным игроком
+  // маршрут с исходным игровым цветом "red" неотличим от простого красного
+  // маршрута (плоская заливка та же). Градиент даёт объёмный "жетон", не
+  // пересекается по виду с плоскими игровыми цветами карт.
+  function buildTtrOwnerGradients(svg) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS(svgNS, 'defs');
+      svg.insertBefore(defs, svg.firstChild);
+    }
+    Object.entries(TTR_ROUTE_PAINT_HEX).forEach(([name, hex]) => {
+      const grad = document.createElementNS(svgNS, 'linearGradient');
+      grad.setAttribute('id', `ttr-owner-grad-${name}`);
+      // вертикальный (поперёк длины вагона, а не вдоль неё) градиент с
+      // резким светлым краем сверху — читается как скруглённый выпуклый
+      // брусок, освещённый сверху, а не просто плоская заливка с переливом
+      grad.setAttribute('x1', '0%'); grad.setAttribute('y1', '0%');
+      grad.setAttribute('x2', '0%'); grad.setAttribute('y2', '100%');
+      [
+        [0, ttrShade(hex, 65)],
+        [25, ttrShade(hex, 30)],
+        [55, hex],
+        [100, ttrShade(hex, -40)],
+      ].forEach(([offset, color]) => {
+        const stop = document.createElementNS(svgNS, 'stop');
+        stop.setAttribute('offset', `${offset}%`);
+        stop.setAttribute('stop-color', color);
+        grad.appendChild(stop);
+      });
+      defs.appendChild(grad);
+    });
+  }
+
+  let ttrAssets = null; // { citiesById, routesById, trainColors } — статика карты, грузим один раз
+  let ttrAssetsPromise = null;
+  let ttrPaymentState = null; // { routeId, payment: {color: n} } — открытая панель оплаты маршрута
+  let ttrTunnelRouteId = null; // routeId текущего pendingTunnel — чтобы не сбрасывать черновик доплаты зря
+  let ttrTunnelDraft = {};
+  let ttrTicketPickerKey = null; // "from-to|from-to..." текущего показанного набора билетов
+  let ttrTicketPickerSelected = new Set();
+
+  function loadTtrAssets() {
+    if (!ttrAssetsPromise) {
+      ttrAssetsPromise = Promise.all([
+        fetch('/api/ttr/map').then(r => r.json()),
+        fetch('/ttr/ttr-map.svg').then(r => r.text()),
+      ]).then(([mapData, svgText]) => {
+        const citiesById = {};
+        mapData.cities.forEach(c => { citiesById[c.id] = c; });
+        const routesById = {};
+        mapData.routes.forEach(r => { routesById[r.id] = r; });
+        ttrAssets = { citiesById, routesById, trainColors: mapData.trainColors, svgText };
+      });
+    }
+    return ttrAssetsPromise;
+  }
+
+  function ttrCanAct(view) {
+    return view.currentPlayerId === view.me?.id
+      && (view.phase === 'playing' || view.phase === 'final-round')
+      && !view.pendingTunnel
+      && !view.myPendingTickets;
+  }
+
+  let ttrZoom = 1;
+  const TTR_ZOOM_MIN = 1;
+  const TTR_ZOOM_MAX = 3;
+  const TTR_ZOOM_STEP = 0.25;
+
+  function applyTtrZoom() {
+    const svg = $('#ttr-map-container svg');
+    if (svg) svg.style.width = `${ttrZoom * 100}%`;
+  }
+
+  function mountTtrMap() {
+    const container = $('#ttr-map-container');
+    container.innerHTML = ttrAssets.svgText;
+    const svg = container.querySelector('svg');
+    if (svg) {
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      buildTtrOwnerGradients(svg);
+    }
+    ttrZoom = 1;
+    applyTtrZoom();
+    closeTtrPayment();
+  }
+
+  function renderTtrGame(view, freshStart) {
+    loadTtrAssets().then(() => {
+      // комната могла уйти на другой экран, пока грузилась карта — не рисуем в пустоту
+      if (state.lastView !== view) return;
+      if (freshStart) mountTtrMap();
+      renderTtrRoster(view);
+      paintTtrRoutes(view);
+      renderTtrHand(view);
+      renderTtrDeckFaceUp(view);
+      renderTtrTickets(view);
+      renderTtrTicketPicker(view);
+      renderTtrPaymentPanel(view);
+      renderTtrTunnelPanel(view);
+    });
+  }
+
+  function renderTtrRoster(view) {
+    $('#btn-force-end-game-ttr').hidden = !view.me?.isHost;
+    const players = view.ttrPlayers || [];
+    const roomPlayers = view.players || [];
+    $('#ttr-roster-row').innerHTML = players.map((p) => {
+      const roomP = roomPlayers.find(rp => rp.id === p.id);
+      const offline = roomP && !roomP.connected;
+      const isTurn = p.id === view.currentPlayerId;
+      const hex = TTR_PLAYER_HEX[p.color] || '#999';
+      return `
+        <span class="roster-chip ttr-roster-chip ${offline ? 'offline' : ''} ${isTurn ? 'ttr-turn' : ''}">
+          <span class="dot" style="background:${hex}"></span>${escapeHtml(p.name)}${offline ? ' (офлайн)' : ''}
+          <span class="ttr-roster-stats">🚃<b style="color:${hex}">${p.trainsLeft}</b> · 🏆${p.score}</span>
+        </span>
+      `;
+    }).join('');
+
+    const turnPlayer = players.find(p => p.id === view.currentPlayerId);
+    const indicator = $('#ttr-turn-indicator');
+    if (view.pendingTunnel) {
+      indicator.textContent = (view.pendingTunnel.playerId === view.me?.id) ? 'Решите судьбу туннеля' : 'Соперник решает судьбу туннеля';
+    } else if (view.myPendingTickets) {
+      indicator.textContent = 'Выберите билеты';
+    } else if (turnPlayer) {
+      indicator.textContent = (turnPlayer.id === view.me?.id) ? 'Ваш ход' : `Ход: ${turnPlayer.name}`;
+    } else {
+      indicator.textContent = '';
+    }
+  }
+
+  function paintRouteShapes(routeEl, colorName) {
+    const hex = TTR_ROUTE_PAINT_HEX[colorName] || '#999';
+    const shapes = /^(rect|path|polygon|circle)$/i.test(routeEl.tagName) ? [routeEl] : routeEl.querySelectorAll('rect, path, polygon, circle');
+    shapes.forEach((s) => {
+      s.setAttribute('fill', colorName ? `url(#ttr-owner-grad-${colorName})` : hex);
+      s.setAttribute('fill-opacity', '1');
+      s.setAttribute('stroke', ttrShade(hex, -45));
+      s.setAttribute('stroke-width', '14');
+    });
+  }
+
+  function paintTtrRoutes(view) {
+    const container = $('#ttr-map-container');
+    const canAct = ttrCanAct(view);
+    const fulfilledSet = new Set(view.myFulfilledTicketRouteIds || []);
+    Object.keys(ttrAssets.routesById).forEach((routeId) => {
+      const el = container.querySelector('#' + routeId);
+      if (!el) return;
+      const ownerId = view.routeOwner[routeId];
+      el.classList.remove('ttr-claimable', 'ttr-selected');
+      if (ownerId) {
+        const isMine = ownerId === view.me?.id;
+        const player = (view.ttrPlayers || []).find(p => p.id === ownerId);
+        paintRouteShapes(el, (isMine && fulfilledSet.has(routeId)) ? TTR_TICKET_DONE_KEY : player?.color);
+      } else {
+        if (canAct) el.classList.add('ttr-claimable');
+        if (ttrPaymentState && ttrPaymentState.routeId === routeId) el.classList.add('ttr-selected');
+      }
+    });
+  }
+
+  function onTtrRouteClick(routeId) {
+    const view = state.lastView;
+    if (!view || !ttrAssets) return;
+    if (!ttrCanAct(view)) return;
+    if (view.routeOwner[routeId]) return;
+    const route = ttrAssets.routesById[routeId];
+    if (!route) return;
+    ttrPaymentState = { routeId: route.id, payment: {} };
+    renderTtrPaymentPanel(view);
+    paintTtrRoutes(view);
+  }
+
+  function ttrCardTile(color, count) {
+    const hex = TTR_CARD_HEX[color] || '#999';
+    return `<span class="ttr-card" style="--ttr-card-color:${hex}" title="${TTR_CARD_LABELS[color] || color}">${count != null ? `<b>${count}</b>` : ''}</span>`;
+  }
+
+  function renderTtrHand(view) {
+    const hand = view.myHand || {};
+    const order = [...(ttrAssets.trainColors || []), 'locomotive'];
+    const html = order.filter(c => (hand[c] || 0) > 0).map(c => ttrCardTile(c, hand[c])).join('');
+    $('#ttr-hand').innerHTML = html || '<p class="hint-text">Рука пуста</p>';
+  }
+
+  function renderTtrDeckFaceUp(view) {
+    $('#ttr-deck-count').textContent = view.deckCount;
+    $('#ttr-discard-count').textContent = view.discardCount;
+    const canAct = ttrCanAct(view);
+    $('#ttr-draw-deck').disabled = !canAct;
+    $('#ttr-faceup-row').innerHTML = (view.faceUp || []).map((color, idx) => `
+      <button type="button" class="ttr-card ttr-faceup-btn" data-idx="${idx}" style="--ttr-card-color:${TTR_CARD_HEX[color] || '#999'}" title="${TTR_CARD_LABELS[color] || color}" ${canAct ? '' : 'disabled'}></button>
+    `).join('');
+  }
+
+  function ttrPaymentTile(color, used, have, max) {
+    const hex = TTR_CARD_HEX[color] || '#999';
+    const label = TTR_CARD_LABELS[color] || color;
+    return `
+      <div class="ttr-payment-tile">
+        <span class="ttr-card" style="--ttr-card-color:${hex}"></span>
+        <span class="ttr-payment-label">${label}<br><span class="hint-text">есть: ${have}</span></span>
+        <div class="ttr-stepper">
+          <button type="button" class="ttr-step-minus" data-color="${color}" ${used <= 0 ? 'disabled' : ''}>−</button>
+          <b>${used}</b>
+          <button type="button" class="ttr-step-plus" data-color="${color}" ${used >= max ? 'disabled' : ''}>+</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function closeTtrPayment() {
+    ttrPaymentState = null;
+    $('#ttr-payment-panel').hidden = true;
+    if (state.lastView) paintTtrRoutes(state.lastView);
+  }
+
+  function renderTtrPaymentPanel(view) {
+    const panel = $('#ttr-payment-panel');
+    if (!ttrPaymentState) { panel.hidden = true; return; }
+    // маршрут мог быть занят кем-то другим, пока была открыта панель
+    if (view.routeOwner[ttrPaymentState.routeId]) { closeTtrPayment(); return; }
+    const route = ttrAssets.routesById[ttrPaymentState.routeId];
+    if (!route) { closeTtrPayment(); return; }
+    panel.hidden = false;
+
+    const hand = view.myHand || {};
+    const payment = ttrPaymentState.payment;
+    const chosenColor = Object.keys(payment).find(c => c !== 'locomotive' && payment[c] > 0);
+    const allowedColors = route.color === 'gray' ? (ttrAssets.trainColors || []) : [route.color];
+
+    const fromCity = ttrAssets.citiesById[route.from]?.name || route.from;
+    const toCity = ttrAssets.citiesById[route.to]?.name || route.to;
+    $('#ttr-payment-title').textContent = `${fromCity} — ${toCity} (${route.length})`;
+
+    const total = Object.values(payment).reduce((a, b) => a + b, 0);
+    const locoCount = payment.locomotive || 0;
+
+    const tiles = [];
+    allowedColors.forEach((color) => {
+      if (chosenColor && color !== chosenColor) return;
+      const have = hand[color] || 0;
+      const used = payment[color] || 0;
+      const max = Math.min(have, route.length - (total - used));
+      tiles.push(ttrPaymentTile(color, used, have, max));
+    });
+    const locoHave = hand.locomotive || 0;
+    const locoMax = Math.min(locoHave, route.length - (total - locoCount));
+    tiles.push(ttrPaymentTile('locomotive', locoCount, locoHave, locoMax));
+    $('#ttr-payment-cards').innerHTML = tiles.join('');
+
+    let statusText = `Выбрано ${total} из ${route.length}`;
+    if (route.ferry) statusText += ` · паром: нужно минимум ${route.ferry} локомотив(ов)`;
+    $('#ttr-payment-status').textContent = statusText;
+
+    $('#btn-ttr-payment-confirm').disabled = !(total === route.length && locoCount >= (route.ferry || 0));
+  }
+
+  function renderTtrTunnelPanel(view) {
+    const panel = $('#ttr-tunnel-panel');
+    const pending = view.pendingTunnel;
+    if (!pending) { panel.hidden = true; ttrTunnelRouteId = null; return; }
+    panel.hidden = false;
+    if (ttrTunnelRouteId !== pending.routeId) {
+      ttrTunnelRouteId = pending.routeId;
+      ttrTunnelDraft = {};
+    }
+
+    const revealedHtml = pending.revealed.map(c => ttrCardTile(c)).join('');
+    $('#ttr-tunnel-text').innerHTML = `Вскрыты карты: ${revealedHtml}<br>Нужно доплатить ${pending.extraNeeded} карт(ы) цвета <b>${TTR_CARD_LABELS[pending.colorUsed] || pending.colorUsed}</b> (или локомотивами), либо отказаться от маршрута.`;
+
+    const hand = view.myHand || {};
+    const total = Object.values(ttrTunnelDraft).reduce((a, b) => a + b, 0);
+    const locoCount = ttrTunnelDraft.locomotive || 0;
+
+    const tiles = [];
+    if (pending.colorUsed !== 'locomotive') {
+      const colorCount = ttrTunnelDraft[pending.colorUsed] || 0;
+      const colorHave = hand[pending.colorUsed] || 0;
+      tiles.push(ttrPaymentTile(pending.colorUsed, colorCount, colorHave, Math.min(colorHave, pending.extraNeeded - (total - colorCount))));
+    }
+    const locoHave = hand.locomotive || 0;
+    tiles.push(ttrPaymentTile('locomotive', locoCount, locoHave, Math.min(locoHave, pending.extraNeeded - (total - locoCount))));
+    $('#ttr-tunnel-cards').innerHTML = tiles.join('');
+
+    $('#btn-ttr-tunnel-pay').disabled = total !== pending.extraNeeded;
+  }
+
+  function ttrTicketRow(t) {
+    const from = ttrAssets.citiesById[t.from]?.name || t.from;
+    const to = ttrAssets.citiesById[t.to]?.name || t.to;
+    return `<div class="ttr-ticket-row" data-from="${t.from}" data-to="${t.to}"><span>${escapeHtml(from)} → ${escapeHtml(to)}</span><b>${t.points}</b></div>`;
+  }
+
+  function renderTtrTickets(view) {
+    const tickets = view.myTickets || [];
+    $('#ttr-tickets-list').innerHTML = tickets.length
+      ? tickets.map(t => ttrTicketRow(t)).join('')
+      : '<p class="hint-text">Пока нет билетов</p>';
+    $('#btn-ttr-draw-tickets').disabled = !ttrCanAct(view);
+  }
+
+  function renderTtrTicketPicker(view) {
+    const overlay = $('#ttr-ticket-picker');
+    const heading = overlay.querySelector('h3');
+    const confirmBtn = $('#btn-ttr-confirm-tickets');
+    const pending = view.myPendingTickets;
+
+    if (pending) {
+      overlay.hidden = false;
+      heading.textContent = 'Выберите билеты';
+      confirmBtn.hidden = false;
+      const key = pending.map(t => `${t.from}-${t.to}`).join('|');
+      if (ttrTicketPickerKey !== key) {
+        ttrTicketPickerKey = key;
+        // по умолчанию оставляем все — игрок сам снимает лишние выше минимума
+        ttrTicketPickerSelected = new Set(pending.map((_, i) => i));
+      }
+      const minKeep = view.myPendingTicketsMinKeep || 1;
+      $('#ttr-ticket-picker-hint').textContent = `Оставьте минимум ${minKeep} из ${pending.length}`;
+      $('#ttr-ticket-picker-list').innerHTML = pending.map((t, i) => {
+        const from = ttrAssets.citiesById[t.from]?.name || t.from;
+        const to = ttrAssets.citiesById[t.to]?.name || t.to;
+        const selected = ttrTicketPickerSelected.has(i);
+        return `
+          <button type="button" class="ttr-ticket-pick ${selected ? 'selected' : ''}" data-idx="${i}">
+            <span>${escapeHtml(from)} → ${escapeHtml(to)}</span><b>${t.points}</b>
+          </button>
+        `;
+      }).join('');
+      confirmBtn.disabled = ttrTicketPickerSelected.size < minKeep;
+      return;
+    }
+
+    ttrTicketPickerKey = null;
+    // фаза initial-tickets общая на всех — пока хоть кто-то не выбрал,
+    // партия не переходит в 'playing'; сам я мог уже выбрать и жду других,
+    // показываем это явно, а не тихо распахиваем игровое поле
+    if (view.phase !== 'initial-tickets') { overlay.hidden = true; return; }
+
+    overlay.hidden = false;
+    heading.textContent = 'Ожидание';
+    confirmBtn.hidden = true;
+    const waitingNames = (view.awaitingInitialTickets || [])
+      .map(id => (view.ttrPlayers || []).find(p => p.id === id)?.name || '?');
+    $('#ttr-ticket-picker-hint').textContent = waitingNames.length
+      ? `Ждём выбор билетов: ${waitingNames.join(', ')}`
+      : 'Все выбрали — игра вот-вот начнётся…';
+    $('#ttr-ticket-picker-list').innerHTML = '';
+  }
+
+  function renderTtrFinishedScores(view) {
+    const players = [...(view.ttrPlayers || [])].sort((a, b) => b.score - a.score);
+    const rows = players.map(p => `
+      <tr class="${p.id === view.winner ? 'ttr-winner-row' : ''}">
+        <td><span class="dot" style="background:${TTR_PLAYER_HEX[p.color] || '#999'}"></span> ${escapeHtml(p.name)}</td>
+        <td>${p.score}</td>
+      </tr>
+    `).join('');
+    $('#ttr-finished-scores').innerHTML = `<thead><tr><th>Игрок</th><th>Очки</th></tr></thead><tbody>${rows}</tbody>`;
+  }
+
+  // --- обработчики (делегирование на статичные контейнеры — переживает
+  // перерисовку innerHTML динамических списков внутри них) ---
+  $('#ttr-map-container').addEventListener('click', (e) => {
+    const routeEl = e.target.closest('[id^="route_"]');
+    if (!routeEl) return;
+    onTtrRouteClick(routeEl.id);
+  });
+
+  // наведение на карточку билета (в списке "Мои билеты") подсвечивает на
+  // карте два города, которые этот билет требует связать
+  function ttrHighlightCities(fromId, toId, on) {
+    const container = $('#ttr-map-container');
+    [fromId, toId].forEach((cityId) => {
+      const el = container.querySelector('#city_' + cityId);
+      if (el) el.classList.toggle('ttr-city-highlight', on);
+    });
+  }
+
+  $('#ttr-tickets-list').addEventListener('mouseover', (e) => {
+    const row = e.target.closest('.ttr-ticket-row');
+    if (!row) return;
+    ttrHighlightCities(row.dataset.from, row.dataset.to, true);
+  });
+  $('#ttr-tickets-list').addEventListener('mouseout', (e) => {
+    const row = e.target.closest('.ttr-ticket-row');
+    if (!row) return;
+    if (row.contains(e.relatedTarget)) return;
+    ttrHighlightCities(row.dataset.from, row.dataset.to, false);
+  });
+
+  $('#ttr-zoom-in').addEventListener('click', () => {
+    ttrZoom = Math.min(TTR_ZOOM_MAX, ttrZoom + TTR_ZOOM_STEP);
+    applyTtrZoom();
+  });
+  $('#ttr-zoom-out').addEventListener('click', () => {
+    ttrZoom = Math.max(TTR_ZOOM_MIN, ttrZoom - TTR_ZOOM_STEP);
+    applyTtrZoom();
+  });
+  $('#ttr-zoom-reset').addEventListener('click', () => {
+    ttrZoom = 1;
+    applyTtrZoom();
+  });
+
+  $('#ttr-draw-deck').addEventListener('click', async () => {
+    const res = await emit('draw-card', { source: 'deck' });
+    if (res.error) alert(res.error);
+  });
+
+  $('#ttr-faceup-row').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.ttr-faceup-btn');
+    if (!btn) return;
+    const res = await emit('draw-card', { source: Number(btn.dataset.idx) });
+    if (res.error) alert(res.error);
+  });
+
+  $('#btn-ttr-draw-tickets').addEventListener('click', async () => {
+    const res = await emit('draw-tickets', {});
+    if (res.error) alert(res.error);
+  });
+
+  $('#ttr-ticket-picker-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.ttr-ticket-pick');
+    if (!btn) return;
+    const idx = Number(btn.dataset.idx);
+    if (ttrTicketPickerSelected.has(idx)) ttrTicketPickerSelected.delete(idx);
+    else ttrTicketPickerSelected.add(idx);
+    renderTtrTicketPicker(state.lastView);
+  });
+
+  $('#btn-ttr-confirm-tickets').addEventListener('click', async () => {
+    const res = await emit('choose-tickets', { keepIndices: [...ttrTicketPickerSelected] });
+    if (res.error) alert(res.error);
+  });
+
+  $('#ttr-payment-cards').addEventListener('click', (e) => {
+    const btn = e.target.closest('.ttr-step-plus, .ttr-step-minus');
+    if (!btn || !ttrPaymentState) return;
+    const color = btn.dataset.color;
+    const delta = btn.classList.contains('ttr-step-plus') ? 1 : -1;
+    const payment = ttrPaymentState.payment;
+    if (delta > 0 && color !== 'locomotive') {
+      Object.keys(payment).forEach((c) => { if (c !== 'locomotive' && c !== color) delete payment[c]; });
+    }
+    payment[color] = Math.max(0, (payment[color] || 0) + delta);
+    if (payment[color] === 0) delete payment[color];
+    renderTtrPaymentPanel(state.lastView);
+  });
+
+  $('#btn-ttr-payment-cancel').addEventListener('click', closeTtrPayment);
+
+  $('#btn-ttr-payment-confirm').addEventListener('click', async () => {
+    if (!ttrPaymentState) return;
+    const res = await emit('claim-route', { routeId: ttrPaymentState.routeId, payment: ttrPaymentState.payment });
+    if (res.error) { alert(res.error); return; }
+    closeTtrPayment();
+  });
+
+  $('#ttr-tunnel-cards').addEventListener('click', (e) => {
+    const btn = e.target.closest('.ttr-step-plus, .ttr-step-minus');
+    if (!btn) return;
+    const color = btn.dataset.color;
+    const delta = btn.classList.contains('ttr-step-plus') ? 1 : -1;
+    ttrTunnelDraft[color] = Math.max(0, (ttrTunnelDraft[color] || 0) + delta);
+    if (ttrTunnelDraft[color] === 0) delete ttrTunnelDraft[color];
+    renderTtrTunnelPanel(state.lastView);
+  });
+
+  $('#btn-ttr-tunnel-decline').addEventListener('click', async () => {
+    const res = await emit('resolve-tunnel', { decision: null });
+    if (res.error) alert(res.error);
+  });
+
+  $('#btn-ttr-tunnel-pay').addEventListener('click', async () => {
+    const res = await emit('resolve-tunnel', { decision: { extraPayment: ttrTunnelDraft } });
+    if (res.error) alert(res.error);
+  });
+
   // ---------- маршрутизация состояния ----------
   function applyRoomUpdate(view) {
     state.lastView = view;
@@ -1024,11 +1614,16 @@
     renderChat(view);
     $('#btn-toggle-games').hidden = !(view.pastGames && view.pastGames.length);
     if (state.gamesOpen) renderGamesList(view);
+    const isTtr = view.gameType === 'ttr';
     if (view.status === 'lobby') {
       state.historyOpen = false;
       $('#history-panel').hidden = true;
       showScreen('lobby');
       renderLobby(view);
+    } else if (view.status === 'playing' && isTtr) {
+      const freshStart = state.ttrLastStatus !== 'playing';
+      showScreen('game-ttr');
+      renderTtrGame(view, freshStart);
     } else if (view.status === 'playing') {
       showScreen('game');
       renderGame(view);
@@ -1036,6 +1631,7 @@
       showScreen('finished');
       renderFinished(view);
     }
+    state.ttrLastStatus = view.status;
   }
   socket.on('room-update', applyRoomUpdate);
 
