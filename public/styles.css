@@ -238,6 +238,22 @@ h1 {
 .lobby-wrap { max-width: 720px; margin: 0 auto; }
 .lobby-hint { color: var(--text-muted); text-align: center; font-size: 14px; margin-bottom: 24px; }
 
+.game-type-picker { display: flex; gap: 8px; margin-bottom: 20px; }
+.game-type-btn {
+  flex: 1;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+.game-type-btn.active { border-color: var(--accent-dim); color: var(--accent); background: rgba(124, 227, 139, 0.08); }
+.game-type-btn:disabled { cursor: not-allowed; opacity: 0.7; }
+
 .teams-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

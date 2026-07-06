@@ -2,7 +2,11 @@ const path = require('path');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { RoomManager, REVEAL_TIME_MS } = require('./game');
+const { RoomManager } = require('./game');
+// таймер автопродолжения раунда специфичен для «Декодера» (фаза reveal);
+// у будущих типов игр может не быть такой фазы вовсе — это нормально,
+// проверка на room.game.phase === 'reveal' ниже просто не сработает для них
+const { REVEAL_TIME_MS } = require('./games/decoder');
 
 const app = express();
 const server = http.createServer(app);
@@ -114,6 +118,15 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
+  socket.on('set-game-type', ({ gameType }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.setGameType(s.playerId, gameType);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
   socket.on('start-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
@@ -151,7 +164,7 @@ io.on('connection', (socket) => {
     if (res.ok) {
       broadcastRoom(room);
       // следующий раунд начинается сам через паузу — никто не жмёт кнопку
-      if (room.phase === 'reveal' && room.status === 'playing') scheduleRevealAdvance(room);
+      if (room.status === 'playing' && room.game?.phase === 'reveal') scheduleRevealAdvance(room);
     }
   });
 
@@ -248,8 +261,8 @@ setInterval(() => manager.cleanup(), 1000 * 60 * 10);
 // доигрываем оставшееся время таймера (или сразу переходим дальше, если
 // пауза уже истекла, пока сервер был выключен)
 for (const room of manager.rooms.values()) {
-  if (room.status === 'playing' && room.phase === 'reveal' && room.revealDeadline) {
-    const remaining = room.revealDeadline - Date.now();
+  if (room.status === 'playing' && room.game?.phase === 'reveal' && room.game.revealDeadline) {
+    const remaining = room.game.revealDeadline - Date.now();
     if (remaining <= 0) {
       const res = room.nextRound();
       if (res.ok) manager.save(room);

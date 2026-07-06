@@ -243,8 +243,29 @@
     if (res.error) alert(res.error);
   });
 
+  // переключатель вида игры — сейчас единственный вариант «Декодер», но
+  // сервер уже отдаёт список доступных модулей, так что новые виды игр
+  // появятся здесь сами, без изменений на клиенте
+  function renderGameTypePicker(view) {
+    const isHost = view.me?.isHost;
+    const types = view.availableGameTypes || [];
+    $('#game-type-picker').innerHTML = types.map(t => `
+      <button type="button" class="game-type-btn ${t.id === view.gameType ? 'active' : ''}" data-type="${t.id}" ${isHost ? '' : 'disabled'}>${escapeHtml(t.label)}</button>
+    `).join('');
+    if (isHost) {
+      $all('.game-type-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (btn.classList.contains('active')) return;
+          const res = await emit('set-game-type', { gameType: btn.dataset.type });
+          if (res.error) alert(res.error);
+        });
+      });
+    }
+  }
+
   function renderLobby(view) {
     $('#lobby-room-code').textContent = view.code;
+    renderGameTypePicker(view);
 
     const byTeam = { A: [], B: [], none: [] };
     view.players.forEach(p => {
