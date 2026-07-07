@@ -114,48 +114,6 @@ function ticketFulfilled(ticket, ownedRouteIds) {
   return false;
 }
 
-// то же самое, что ticketFulfilled, но возвращает не bool, а сам список id
-// маршрутов, которые реально соединяют города билета (BFS с запоминанием,
-// через какое ребро пришли в город) — null, если билет ещё не выполнен.
-// Нужно клиенту, чтобы подсветить именно те маршруты, что зачитывают билет,
-// а не все построенные игроком маршруты подряд.
-function ticketConnectingRoutes(ticket, ownedRouteIds) {
-  const owned = ROUTES.filter((r) => ownedRouteIds.has(r.id));
-  const adj = new Map(); // city -> [{to, routeId}]
-  owned.forEach((r) => {
-    if (!adj.has(r.from)) adj.set(r.from, []);
-    if (!adj.has(r.to)) adj.set(r.to, []);
-    adj.get(r.from).push({ to: r.to, routeId: r.id });
-    adj.get(r.to).push({ to: r.from, routeId: r.id });
-  });
-
-  if (ticket.from === ticket.to) return [];
-  const cameFrom = new Map(); // city -> { prevCity, routeId }
-  const visited = new Set([ticket.from]);
-  const queue = [ticket.from];
-  while (queue.length) {
-    const cur = queue.shift();
-    if (cur === ticket.to) {
-      const path = [];
-      let node = ticket.to;
-      while (node !== ticket.from) {
-        const step = cameFrom.get(node);
-        path.push(step.routeId);
-        node = step.prevCity;
-      }
-      return path;
-    }
-    for (const { to, routeId } of adj.get(cur) || []) {
-      if (!visited.has(to)) {
-        visited.add(to);
-        cameFrom.set(to, { prevCity: cur, routeId });
-        queue.push(to);
-      }
-    }
-  }
-  return null;
-}
-
 // самый длинный непрерывный путь вагончиков одного игрока (для бонуса +10) —
 // полный перебор простых путей по собственному графу; граф игрока — это
 // малая часть всей карты (до ~40 рёбер), полный DFS-перебор тут не проблема
@@ -201,6 +159,5 @@ module.exports = {
   canAffordAnyPayment,
   resolveTunnelDraw,
   ticketFulfilled,
-  ticketConnectingRoutes,
   longestPath,
 };

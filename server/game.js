@@ -70,10 +70,6 @@ class Room {
     }
   }
 
-  isEmpty() {
-    return [...this.players.values()].every(p => !p.connected);
-  }
-
   setConnected(id, connected) {
     const player = this.players.get(id);
     if (player) player.connected = connected;
@@ -81,11 +77,19 @@ class Room {
 
   // чат работает в любой момент жизни комнаты (лобби/игра/финал), не
   // привязан к конкретной партии — переживает «играть ещё раз»
-  sendMessage(playerId, text) {
+  sendMessage(playerId, text, replyToId) {
     const player = this.players.get(playerId);
     if (!player) return { error: 'Игрок не найден' };
     const trimmed = (text || '').trim().slice(0, 300);
     if (!trimmed) return { error: 'Пустое сообщение' };
+    // сохраняем не ссылку на оригинал, а готовый снимок — если оригинал
+    // потом выпадет за пределы истории в 200 сообщений, цитата в ответе
+    // всё равно останется читаемой
+    let replyTo = null;
+    if (replyToId) {
+      const original = this.chat.find((m) => m.id === replyToId);
+      if (original) replyTo = { id: original.id, name: original.name, text: original.text.slice(0, 140) };
+    }
     const message = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       playerId,
@@ -93,6 +97,7 @@ class Room {
       team: player.team,
       text: trimmed,
       ts: Date.now(),
+      replyTo,
     };
     this.chat.push(message);
     // ограничиваем историю, чтобы комната не росла бесконечно
@@ -179,6 +184,7 @@ class Room {
   resolveTunnel(playerId, decision) { return this._delegate('resolveTunnel', playerId, decision); }
   drawTickets(playerId) { return this._delegate('drawTickets', playerId); }
   chooseTickets(playerId, keepIndices) { return this._delegate('chooseTickets', playerId, keepIndices); }
+  buildStation(playerId, routeId, payment) { return this._delegate('buildStation', playerId, routeId, payment); }
 
   nextRound() {
     if (!this.game) return { error: 'Рано' };
@@ -310,21 +316,11 @@ class RoomManager {
     store.saveRoom(room);
   }
 
-  cleanup() {
-    for (const [code, room] of this.rooms) {
-      const age = Date.now() - room.createdAt;
-      if (room.isEmpty() && age > 1000 * 60 * 30) {
-        this.rooms.delete(code);
-        store.deleteRoom(code);
-      }
-    }
-  }
-
-  // краткая сводка по всем «живым» комнатам (хотя бы один игрок онлайн) —
-  // для окна со списком комнат на экране входа
+  // краткая сводка по ВСЕМ когда-либо созданным комнатам (не только
+  // активным сейчас) — комнаты больше не удаляются, чтобы историю можно
+  // было посмотреть на экране входа
   listSummaries() {
     return [...this.rooms.values()]
-      .filter(room => !room.isEmpty())
       .map(room => ({
         code: room.code,
         status: room.status,

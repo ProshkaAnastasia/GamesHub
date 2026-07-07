@@ -240,6 +240,15 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
+  socket.on('build-station', ({ routeId, payment }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.buildStation(s.playerId, routeId, payment);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
   socket.on('force-end-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
@@ -260,11 +269,11 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('send-chat', ({ text }, cb) => {
+  socket.on('send-chat', ({ text, replyTo }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
-    const res = room.sendMessage(s.playerId, text);
+    const res = room.sendMessage(s.playerId, text, replyTo);
     cb?.(res);
     if (res.ok) broadcastRoom(room);
   });
@@ -318,8 +327,6 @@ function handleDisconnect(socket) {
   }, DISCONNECT_GRACE_MS);
   disconnectTimers.set(key, timer);
 }
-
-setInterval(() => manager.cleanup(), 1000 * 60 * 10);
 
 // восстановленные из файлов комнаты могли остановиться на фазе результата —
 // доигрываем оставшееся время таймера (или сразу переходим дальше, если

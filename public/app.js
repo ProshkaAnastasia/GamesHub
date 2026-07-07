@@ -169,7 +169,7 @@
   function renderRoomsList(rooms) {
     const list = $('#rooms-list');
     if (!rooms.length) {
-      list.innerHTML = '<p class="hint-text">Сейчас нет активных комнат</p>';
+      list.innerHTML = '<p class="hint-text">Комнат пока нет</p>';
       return;
     }
     list.innerHTML = rooms.map(r => `
@@ -248,6 +248,8 @@
     history.replaceState(null, '', location.pathname);
     state.lastView = null;
     state.chatOpen = false;
+    chatReplyTo = null;
+    renderChatReplyPreview();
     $('#btn-toggle-chat').hidden = true;
     $('#chat-panel').hidden = true;
     $('#btn-toggle-games').hidden = true;
@@ -1101,12 +1103,16 @@
     orange: 'Оранжевый', black: 'Чёрный', red: 'Красный', green: 'Зелёный',
     locomotive: 'Локомотив',
   };
+  // картинки карт вагонов (public/ttr/cards/) — имена файлов совпадают с
+  // игровыми цветами, кроме двух: официальный цвет "white" на самом деле
+  // рисуется коричневым (см. CLAUDE.md про #AC7F5E), и локомотив-джокер
+  // называется "rainbow"
+  const TTR_CARD_IMAGE = {
+    pink: 'pink.jpg', white: 'brown.png', blue: 'blue.jpg', yellow: 'yellow.jpg',
+    orange: 'orange.jpg', black: 'black.jpg', red: 'red.jpg', green: 'green.jpg',
+    locomotive: 'rainbow.jpg',
+  };
   const TTR_PLAYER_HEX = { red: '#E5484D', blue: '#0091FF', green: '#30A46C', yellow: '#F5D90A', black: '#495057' };
-  // отдельный ключ (не игровой цвет) — маршрут, который реально соединяет
-  // города одного из МОИХ билетов через мою сеть, красится в этот зелёный
-  // вместо цвета владения, чтобы сразу было видно "билет засчитан"
-  const TTR_TICKET_DONE_KEY = 'ticket-done';
-  const TTR_ROUTE_PAINT_HEX = { ...TTR_PLAYER_HEX, [TTR_TICKET_DONE_KEY]: '#7ce38b' };
 
   // сдвигает hex-цвет к белому (percent > 0) или к чёрному (percent < 0)
   function ttrShade(hex, percent) {
@@ -1129,7 +1135,7 @@
       defs = document.createElementNS(svgNS, 'defs');
       svg.insertBefore(defs, svg.firstChild);
     }
-    Object.entries(TTR_ROUTE_PAINT_HEX).forEach(([name, hex]) => {
+    Object.entries(TTR_PLAYER_HEX).forEach(([name, hex]) => {
       const grad = document.createElementNS(svgNS, 'linearGradient');
       grad.setAttribute('id', `ttr-owner-grad-${name}`);
       // вертикальный (поперёк длины вагона, а не вдоль неё) градиент с
@@ -1159,6 +1165,64 @@
   let ttrTunnelDraft = {};
   let ttrTicketPickerKey = null; // "from-to|from-to..." текущего показанного набора билетов
   let ttrTicketPickerSelected = new Set();
+  let ttrSuggestedPath = null; // { idx, from, to, routeIds: Set<routeId> } — подсказка пути по клику на билет
+
+  // кратчайший (по сумме length) путь между городами билета через маршруты,
+  // не занятые соперником — свои уже построенные маршруты считаются
+  // "бесплатными" (вес 0), т.к. их не нужно строить заново. Возвращает
+  // список routeId или null, если соперники перекрыли все варианты.
+  function ttrFindBestPath(view, fromCity, toCity) {
+    const routeOwner = view.routeOwner || {};
+    const myId = view.me?.id;
+    // маршруты, разблокированные МОИМИ станциями — считаются бесплатными
+    // (уже подключены), как и собственные построенные
+    const myLinkedRoutes = new Set((view.stationMarkers || []).filter(m => m.playerId === myId).map(m => m.routeId));
+    const adj = new Map(); // city -> [{to, routeId, weight}]
+    Object.values(ttrAssets.routesById).forEach((r) => {
+      const owner = routeOwner[r.id];
+      const isMineOrLinked = owner === myId || myLinkedRoutes.has(r.id);
+      if (owner && !isMineOrLinked) return; // занято соперником и станции тут нет — недоступно
+      const weight = isMineOrLinked ? 0 : r.length;
+      if (!adj.has(r.from)) adj.set(r.from, []);
+      if (!adj.has(r.to)) adj.set(r.to, []);
+      adj.get(r.from).push({ to: r.to, routeId: r.id, weight });
+      adj.get(r.to).push({ to: r.from, routeId: r.id, weight });
+    });
+
+    if (fromCity === toCity) return [];
+    const dist = new Map([[fromCity, 0]]);
+    const cameFrom = new Map(); // city -> { prevCity, routeId }
+    const visited = new Set();
+    // городов мало (47) — обычный перебор без кучи вполне достаточен
+    while (true) {
+      let cur = null;
+      let curDist = Infinity;
+      for (const [city, d] of dist) {
+        if (!visited.has(city) && d < curDist) { cur = city; curDist = d; }
+      }
+      if (cur === null) break;
+      if (cur === toCity) {
+        const path = [];
+        let node = toCity;
+        while (node !== fromCity) {
+          const step = cameFrom.get(node);
+          path.push(step.routeId);
+          node = step.prevCity;
+        }
+        return path;
+      }
+      visited.add(cur);
+      for (const { to, routeId, weight } of adj.get(cur) || []) {
+        if (visited.has(to)) continue;
+        const nd = curDist + weight;
+        if (nd < (dist.has(to) ? dist.get(to) : Infinity)) {
+          dist.set(to, nd);
+          cameFrom.set(to, { prevCity: cur, routeId });
+        }
+      }
+    }
+    return null; // соперники перекрыли все варианты — билет больше не выполнить
+  }
 
   function loadTtrAssets() {
     if (!ttrAssetsPromise) {
@@ -1215,6 +1279,7 @@
       if (freshStart) mountTtrMap();
       renderTtrRoster(view);
       paintTtrRoutes(view);
+      paintTtrStationMarks(view);
       renderTtrHand(view);
       renderTtrDeckFaceUp(view);
       renderTtrTickets(view);
@@ -1236,7 +1301,7 @@
       return `
         <span class="roster-chip ttr-roster-chip ${offline ? 'offline' : ''} ${isTurn ? 'ttr-turn' : ''}">
           <span class="dot" style="background:${hex}"></span>${escapeHtml(p.name)}${offline ? ' (офлайн)' : ''}
-          <span class="ttr-roster-stats">🚃<b style="color:${hex}">${p.trainsLeft}</b> · 🏆${p.score}</span>
+          <span class="ttr-roster-stats">🚃<b style="color:${hex}">${p.trainsLeft}</b> · 🚉${p.stationsLeft} · 🏆${p.score}</span>
         </span>
       `;
     }).join('');
@@ -1255,7 +1320,7 @@
   }
 
   function paintRouteShapes(routeEl, colorName) {
-    const hex = TTR_ROUTE_PAINT_HEX[colorName] || '#999';
+    const hex = TTR_PLAYER_HEX[colorName] || '#999';
     const shapes = /^(rect|path|polygon|circle)$/i.test(routeEl.tagName) ? [routeEl] : routeEl.querySelectorAll('rect, path, polygon, circle');
     shapes.forEach((s) => {
       s.setAttribute('fill', colorName ? `url(#ttr-owner-grad-${colorName})` : hex);
@@ -1268,20 +1333,74 @@
   function paintTtrRoutes(view) {
     const container = $('#ttr-map-container');
     const canAct = ttrCanAct(view);
-    const fulfilledSet = new Set(view.myFulfilledTicketRouteIds || []);
+    const myId = view.me?.id;
+    const myStationsLeft = (view.ttrPlayers || []).find(p => p.id === myId)?.stationsLeft || 0;
+    const myLinkedRoutes = new Set((view.stationMarkers || []).filter(m => m.playerId === myId).map(m => m.routeId));
     Object.keys(ttrAssets.routesById).forEach((routeId) => {
       const el = container.querySelector('#' + routeId);
       if (!el) return;
       const ownerId = view.routeOwner[routeId];
-      el.classList.remove('ttr-claimable', 'ttr-selected');
+      el.classList.remove('ttr-claimable', 'ttr-selected', 'ttr-suggested');
+      if (ttrSuggestedPath && ttrSuggestedPath.routeIds.has(routeId)) el.classList.add('ttr-suggested');
+      if (ttrPaymentState && ttrPaymentState.routeId === routeId) el.classList.add('ttr-selected');
       if (ownerId) {
-        const isMine = ownerId === view.me?.id;
         const player = (view.ttrPlayers || []).find(p => p.id === ownerId);
-        paintRouteShapes(el, (isMine && fulfilledSet.has(routeId)) ? TTR_TICKET_DONE_KEY : player?.color);
-      } else {
-        if (canAct) el.classList.add('ttr-claimable');
-        if (ttrPaymentState && ttrPaymentState.routeId === routeId) el.classList.add('ttr-selected');
+        paintRouteShapes(el, player?.color);
+        // чужой маршрут, ещё можно поставить сюда станцию — тоже кликабелен
+        if (canAct && ownerId !== myId && myStationsLeft > 0 && !myLinkedRoutes.has(routeId)) {
+          el.classList.add('ttr-claimable');
+        }
+      } else if (canAct) {
+        el.classList.add('ttr-claimable');
       }
+    });
+  }
+
+  // чёрточка-«переезд» поперёк маршрута в цвет игрока — станция, поставленная
+  // на этот (чужой) маршрут. Середина и угол считаются от координат городов
+  // (они уже есть в данных карты), не от геометрии самих SVG-кусочков —
+  // проще и для прямых/почти прямых маршрутов даёт то же самое визуально
+  function paintTtrStationMarks(view) {
+    const svg = $('#ttr-map-container svg');
+    if (!svg) return;
+    svg.querySelectorAll('.ttr-station-mark').forEach((el) => el.remove());
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const byRoute = new Map();
+    (view.stationMarkers || []).forEach((m) => {
+      if (!byRoute.has(m.routeId)) byRoute.set(m.routeId, []);
+      byRoute.get(m.routeId).push(m.playerId);
+    });
+
+    byRoute.forEach((playerIds, routeId) => {
+      const route = ttrAssets.routesById[routeId];
+      const from = route && ttrAssets.citiesById[route.from];
+      const to = route && ttrAssets.citiesById[route.to];
+      if (!from || !to) return;
+      const midX = (from.x + to.x) / 2;
+      const midY = (from.y + to.y) / 2;
+      const angleRad = Math.atan2(to.y - from.y, to.x - from.x);
+      const angleDeg = (angleRad * 180) / Math.PI;
+      const spacing = 140; // если станций на одном пути несколько — раздвигаем вдоль него
+      playerIds.forEach((playerId, i) => {
+        const offset = (i - (playerIds.length - 1) / 2) * spacing;
+        const cx = midX + Math.cos(angleRad) * offset;
+        const cy = midY + Math.sin(angleRad) * offset;
+        const player = (view.ttrPlayers || []).find((p) => p.id === playerId);
+        const hex = TTR_PLAYER_HEX[player?.color] || '#fff';
+        const half = 100;
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', cx - half);
+        line.setAttribute('y1', cy);
+        line.setAttribute('x2', cx + half);
+        line.setAttribute('y2', cy);
+        line.setAttribute('transform', `rotate(${angleDeg + 90} ${cx} ${cy})`);
+        line.setAttribute('stroke', hex);
+        line.setAttribute('stroke-width', '45');
+        line.setAttribute('stroke-linecap', 'round');
+        line.setAttribute('class', 'ttr-station-mark');
+        svg.appendChild(line);
+      });
     });
   }
 
@@ -1289,17 +1408,41 @@
     const view = state.lastView;
     if (!view || !ttrAssets) return;
     if (!ttrCanAct(view)) return;
-    if (view.routeOwner[routeId]) return;
     const route = ttrAssets.routesById[routeId];
     if (!route) return;
-    ttrPaymentState = { routeId: route.id, payment: {} };
+    const ownerId = view.routeOwner[routeId];
+    const myId = view.me?.id;
+
+    if (!ownerId) {
+      ttrPaymentState = { kind: 'route', routeId: route.id, payment: {} };
+      renderTtrPaymentPanel(view);
+      paintTtrRoutes(view);
+      return;
+    }
+
+    // занятый маршрут — свой трогать нечего, чужой можно попробовать
+    // "подключить" станцией (см. buildStation на сервере)
+    if (ownerId === myId) return;
+    const myStationsLeft = (view.ttrPlayers || []).find(p => p.id === myId)?.stationsLeft || 0;
+    if (myStationsLeft <= 0) { alert('Станции закончились.'); return; }
+    const alreadyLinked = (view.stationMarkers || []).some(m => m.routeId === routeId && m.playerId === myId);
+    if (alreadyLinked) return; // тут уже стоит моя станция — второй раз незачем
+
+    ttrPaymentState = { kind: 'station', routeId: route.id, payment: {} };
     renderTtrPaymentPanel(view);
     paintTtrRoutes(view);
   }
 
-  function ttrCardTile(color, count) {
+  // общий стиль для .ttr-card — картинка карты (если для цвета есть файл)
+  // поверх hex-фолбэка (на случай, если картинка не найдётся/не прогрузится)
+  function ttrCardBgStyle(color) {
     const hex = TTR_CARD_HEX[color] || '#999';
-    return `<span class="ttr-card" style="--ttr-card-color:${hex}" title="${TTR_CARD_LABELS[color] || color}">${count != null ? `<b>${count}</b>` : ''}</span>`;
+    const img = TTR_CARD_IMAGE[color];
+    return `--ttr-card-color:${hex};${img ? `background-image:url(/ttr/cards/${img});` : ''}`;
+  }
+
+  function ttrCardTile(color, count) {
+    return `<span class="ttr-card" style="${ttrCardBgStyle(color)}" title="${TTR_CARD_LABELS[color] || color}">${count != null ? `<b>${count}</b>` : ''}</span>`;
   }
 
   function renderTtrHand(view) {
@@ -1315,16 +1458,15 @@
     const canAct = ttrCanAct(view);
     $('#ttr-draw-deck').disabled = !canAct;
     $('#ttr-faceup-row').innerHTML = (view.faceUp || []).map((color, idx) => `
-      <button type="button" class="ttr-card ttr-faceup-btn" data-idx="${idx}" style="--ttr-card-color:${TTR_CARD_HEX[color] || '#999'}" title="${TTR_CARD_LABELS[color] || color}" ${canAct ? '' : 'disabled'}></button>
+      <button type="button" class="ttr-card ttr-faceup-btn" data-idx="${idx}" style="${ttrCardBgStyle(color)}" title="${TTR_CARD_LABELS[color] || color}" ${canAct ? '' : 'disabled'}></button>
     `).join('');
   }
 
   function ttrPaymentTile(color, used, have, max) {
-    const hex = TTR_CARD_HEX[color] || '#999';
     const label = TTR_CARD_LABELS[color] || color;
     return `
       <div class="ttr-payment-tile">
-        <span class="ttr-card" style="--ttr-card-color:${hex}"></span>
+        <span class="ttr-card" style="${ttrCardBgStyle(color)}"></span>
         <span class="ttr-payment-label">${label}<br><span class="hint-text">есть: ${have}</span></span>
         <div class="ttr-stepper">
           <button type="button" class="ttr-step-minus" data-color="${color}" ${used <= 0 ? 'disabled' : ''}>−</button>
@@ -1344,6 +1486,7 @@
   function renderTtrPaymentPanel(view) {
     const panel = $('#ttr-payment-panel');
     if (!ttrPaymentState) { panel.hidden = true; return; }
+    if (ttrPaymentState.kind === 'station') { renderTtrStationPaymentPanel(view); return; }
     // маршрут мог быть занят кем-то другим, пока была открыта панель
     if (view.routeOwner[ttrPaymentState.routeId]) { closeTtrPayment(); return; }
     const route = ttrAssets.routesById[ttrPaymentState.routeId];
@@ -1382,6 +1525,46 @@
     $('#btn-ttr-payment-confirm').disabled = !(total === route.length && locoCount >= (route.ferry || 0));
   }
 
+  // станция ставится на уже занятый ЧУЖОЙ маршрут — любым одним цветом
+  // (нет привязки к цвету самого маршрута, в отличие от обычной постройки),
+  // стоимость растёт с каждой следующей станцией (1/2/3)
+  function renderTtrStationPaymentPanel(view) {
+    const panel = $('#ttr-payment-panel');
+    const route = ttrAssets.routesById[ttrPaymentState.routeId];
+    const ownerId = view.routeOwner[ttrPaymentState.routeId];
+    const myId = view.me?.id;
+    if (!route || !ownerId || ownerId === myId) { closeTtrPayment(); return; }
+    panel.hidden = false;
+
+    const me = (view.ttrPlayers || []).find(p => p.id === myId);
+    const cost = 4 - (me?.stationsLeft ?? 0); // 3 осталось -> 1-я станция стоит 1, и т.д.
+    const hand = view.myHand || {};
+    const payment = ttrPaymentState.payment;
+    const chosenColor = Object.keys(payment).find(c => c !== 'locomotive' && payment[c] > 0);
+    const total = Object.values(payment).reduce((a, b) => a + b, 0);
+    const locoCount = payment.locomotive || 0;
+
+    const fromCity = ttrAssets.citiesById[route.from]?.name || route.from;
+    const toCity = ttrAssets.citiesById[route.to]?.name || route.to;
+    $('#ttr-payment-title').textContent = `Станция: ${fromCity} — ${toCity}`;
+
+    const tiles = [];
+    (ttrAssets.trainColors || []).forEach((color) => {
+      if (chosenColor && color !== chosenColor) return;
+      const have = hand[color] || 0;
+      const used = payment[color] || 0;
+      const max = Math.min(have, cost - (total - used));
+      tiles.push(ttrPaymentTile(color, used, have, max));
+    });
+    const locoHave = hand.locomotive || 0;
+    const locoMax = Math.min(locoHave, cost - (total - locoCount));
+    tiles.push(ttrPaymentTile('locomotive', locoCount, locoHave, locoMax));
+    $('#ttr-payment-cards').innerHTML = tiles.join('');
+
+    $('#ttr-payment-status').textContent = `Станция №${cost} из 3 · выбрано ${total} из ${cost}`;
+    $('#btn-ttr-payment-confirm').disabled = total !== cost;
+  }
+
   function renderTtrTunnelPanel(view) {
     const panel = $('#ttr-tunnel-panel');
     const pending = view.pendingTunnel;
@@ -1412,16 +1595,18 @@
     $('#btn-ttr-tunnel-pay').disabled = total !== pending.extraNeeded;
   }
 
-  function ttrTicketRow(t) {
+  function ttrTicketRow(t, idx) {
     const from = ttrAssets.citiesById[t.from]?.name || t.from;
     const to = ttrAssets.citiesById[t.to]?.name || t.to;
-    return `<div class="ttr-ticket-row" data-from="${t.from}" data-to="${t.to}"><span>${escapeHtml(from)} → ${escapeHtml(to)}</span><b>${t.points}</b></div>`;
+    const isActive = ttrSuggestedPath && ttrSuggestedPath.idx === idx;
+    const cls = `ttr-ticket-row${t.fulfilled ? ' ttr-ticket-fulfilled' : ''}${isActive ? ' ttr-ticket-active' : ''}`;
+    return `<div class="${cls}" data-idx="${idx}" data-from="${t.from}" data-to="${t.to}"><span>${escapeHtml(from)} → ${escapeHtml(to)}</span><b>${t.points}</b></div>`;
   }
 
   function renderTtrTickets(view) {
     const tickets = view.myTickets || [];
     $('#ttr-tickets-list').innerHTML = tickets.length
-      ? tickets.map(t => ttrTicketRow(t)).join('')
+      ? tickets.map((t, idx) => ttrTicketRow(t, idx)).join('')
       : '<p class="hint-text">Пока нет билетов</p>';
     $('#btn-ttr-draw-tickets').disabled = !ttrCanAct(view);
   }
@@ -1494,8 +1679,9 @@
     onTtrRouteClick(routeEl.id);
   });
 
-  // наведение на карточку билета (в списке "Мои билеты") подсвечивает на
-  // карте два города, которые этот билет требует связать
+  // клик на карточку билета (в списке "Мои билеты") подсвечивает на карте
+  // два города, которые этот билет требует связать — держится до снятия
+  // подсказки, наведение курсора тут больше ни при чём
   function ttrHighlightCities(fromId, toId, on) {
     const container = $('#ttr-map-container');
     [fromId, toId].forEach((cityId) => {
@@ -1504,16 +1690,33 @@
     });
   }
 
-  $('#ttr-tickets-list').addEventListener('mouseover', (e) => {
+  $('#ttr-tickets-list').addEventListener('click', (e) => {
     const row = e.target.closest('.ttr-ticket-row');
-    if (!row) return;
-    ttrHighlightCities(row.dataset.from, row.dataset.to, true);
-  });
-  $('#ttr-tickets-list').addEventListener('mouseout', (e) => {
-    const row = e.target.closest('.ttr-ticket-row');
-    if (!row) return;
-    if (row.contains(e.relatedTarget)) return;
-    ttrHighlightCities(row.dataset.from, row.dataset.to, false);
+    if (!row || !state.lastView) return;
+    const idx = Number(row.dataset.idx);
+
+    // повторный клик по тому же билету — снять подсказку и погасить его города
+    if (ttrSuggestedPath && ttrSuggestedPath.idx === idx) {
+      ttrHighlightCities(ttrSuggestedPath.from, ttrSuggestedPath.to, false);
+      ttrSuggestedPath = null;
+      paintTtrRoutes(state.lastView);
+      renderTtrTickets(state.lastView);
+      return;
+    }
+
+    // переключились на другой билет — погасить города предыдущего активного
+    if (ttrSuggestedPath) ttrHighlightCities(ttrSuggestedPath.from, ttrSuggestedPath.to, false);
+
+    const path = ttrFindBestPath(state.lastView, row.dataset.from, row.dataset.to);
+    if (!path) {
+      alert('Соперники заняли все маршруты между этими городами — билет больше не выполнить.');
+      ttrSuggestedPath = null;
+    } else {
+      ttrSuggestedPath = { idx, from: row.dataset.from, to: row.dataset.to, routeIds: new Set(path) };
+      ttrHighlightCities(row.dataset.from, row.dataset.to, true);
+    }
+    paintTtrRoutes(state.lastView);
+    renderTtrTickets(state.lastView);
   });
 
   $('#ttr-zoom-in').addEventListener('click', () => {
@@ -1578,7 +1781,8 @@
 
   $('#btn-ttr-payment-confirm').addEventListener('click', async () => {
     if (!ttrPaymentState) return;
-    const res = await emit('claim-route', { routeId: ttrPaymentState.routeId, payment: ttrPaymentState.payment });
+    const event = ttrPaymentState.kind === 'station' ? 'build-station' : 'claim-route';
+    const res = await emit(event, { routeId: ttrPaymentState.routeId, payment: ttrPaymentState.payment });
     if (res.error) { alert(res.error); return; }
     closeTtrPayment();
   });
@@ -1638,6 +1842,20 @@
   // ---------- ЧАТ ----------
   let chatUnread = 0;
   let lastRenderedChatLen = 0;
+  let chatReplyTo = null; // { id, name, text } — на какое сообщение сейчас отвечаем
+
+  // цвет имени — детерминированный хеш от playerId, не от команды (команды
+  // нет в TTR вообще, а тут нужен цвет для любого участника в любой игре)
+  const CHAT_COLORS = ['#57c7e3', '#f0a868', '#7ce38b', '#e35766', '#c78be3', '#e3c757', '#66a3e3', '#e386b0'];
+  function chatColorFor(playerId) {
+    let h = 0;
+    for (let i = 0; i < playerId.length; i++) h = (h * 31 + playerId.charCodeAt(i)) >>> 0;
+    return CHAT_COLORS[h % CHAT_COLORS.length];
+  }
+
+  function chatTimeLabel(ts) {
+    return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  }
 
   function updateChatBadge() {
     const badge = $('#chat-unread-badge');
@@ -1645,18 +1863,40 @@
     badge.textContent = chatUnread > 9 ? '9+' : String(chatUnread);
   }
 
+  function renderChatReplyPreview() {
+    const bar = $('#chat-reply-preview');
+    if (!chatReplyTo) { bar.hidden = true; return; }
+    bar.hidden = false;
+    bar.querySelector('.chat-reply-preview-name').textContent = chatReplyTo.name;
+    bar.querySelector('.chat-reply-preview-snippet').textContent = chatReplyTo.text;
+  }
+
   function renderChat(view) {
     const chat = view.chat || [];
     const list = $('#chat-messages');
     const wasAtBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 20;
 
-    list.innerHTML = chat.map(m => {
+    // подряд идущие сообщения одного автора (в пределах 5 минут) —
+    // показываем имя только у первого в группе
+    let lastPlayerId = null;
+    let lastTs = 0;
+    list.innerHTML = chat.map((m) => {
       const mine = m.playerId === clientId;
-      const teamClass = m.team ? `team-${m.team.toLowerCase()}` : '';
+      const grouped = m.playerId === lastPlayerId && (m.ts - lastTs) < 5 * 60 * 1000;
+      lastPlayerId = m.playerId;
+      lastTs = m.ts;
+      const replyHtml = m.replyTo
+        ? `<div class="chat-reply-quote"><b>${escapeHtml(m.replyTo.name)}</b>: ${escapeHtml(m.replyTo.text)}</div>`
+        : '';
       return `
-        <div class="chat-msg ${mine ? 'mine' : ''} ${teamClass}">
-          <span class="chat-msg-name">${escapeHtml(m.name)}</span>
-          <span class="chat-msg-text">${escapeHtml(m.text)}</span>
+        <div class="chat-msg ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}" style="--chat-color:${chatColorFor(m.playerId)}">
+          ${!grouped ? `<span class="chat-msg-name">${escapeHtml(m.name)}</span>` : ''}
+          <div class="chat-bubble">
+            ${replyHtml}
+            <span class="chat-msg-text">${escapeHtml(m.text)}</span>
+            <span class="chat-msg-time">${chatTimeLabel(m.ts)}</span>
+          </div>
+          <button type="button" class="chat-reply-btn" data-id="${m.id}">↩ Ответить</button>
         </div>
       `;
     }).join('') || '<p class="hint-text">Пока никто ничего не написал</p>';
@@ -1691,14 +1931,50 @@
     $('#chat-panel').hidden = true;
   });
 
-  $('#chat-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
+  $('#chat-messages').addEventListener('click', (e) => {
+    const btn = e.target.closest('.chat-reply-btn');
+    if (!btn) return;
+    const msg = (state.lastView?.chat || []).find(m => m.id === btn.dataset.id);
+    if (!msg) return;
+    chatReplyTo = { id: msg.id, name: msg.name, text: msg.text.slice(0, 140) };
+    renderChatReplyPreview();
+    $('#chat-input').focus();
+  });
+  $('#btn-chat-reply-cancel').addEventListener('click', () => {
+    chatReplyTo = null;
+    renderChatReplyPreview();
+  });
+
+  function autoResizeChatInput() {
+    const input = $('#chat-input');
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  }
+  $('#chat-input').addEventListener('input', autoResizeChatInput);
+  // Enter — отправка, Shift+Enter — перенос строки (обычное поведение мессенджеров)
+  $('#chat-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChatMessage();
+    }
+  });
+
+  async function sendChatMessage() {
     const input = $('#chat-input');
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
-    const res = await emit('send-chat', { text });
+    autoResizeChatInput();
+    const replyToId = chatReplyTo?.id || null;
+    chatReplyTo = null;
+    renderChatReplyPreview();
+    const res = await emit('send-chat', { text, replyTo: replyToId });
     if (res.error) alert(res.error);
+  }
+
+  $('#chat-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendChatMessage();
   });
 
   // отрисовать закэшированный вид комнаты сразу, не дожидаясь ответа сервера

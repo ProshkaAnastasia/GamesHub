@@ -7,8 +7,8 @@
 //   id, label, teamKeys, canStart(teamOrder, players), startRequirementText,
 //   create(players, teamOrder, usedWords), fromData(data, players, teamOrder, usedWords)
 // и интерфейс экземпляра: claimRoute/drawCard/resolveTunnel/drawTickets/
-// chooseTickets/canPlayerLeaveSafely/viewFor/toJSON/getArchiveSummary/
-// finished/winner/winReason.
+// chooseTickets/buildStation/canPlayerLeaveSafely/viewFor/toJSON/
+// getArchiveSummary/finished/winner/winReason.
 const { CITIES, ROUTES } = require('./map');
 const { TICKETS } = require('./tickets');
 const rules = require('./rules');
@@ -16,6 +16,11 @@ const rules = require('./rules');
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 5;
 const PLAYER_COLORS = ['red', 'blue', 'green', 'yellow', 'black'];
+// ⚠️ станции — по памяти о правилах Ticket to Ride Europe, не сверено с
+// оригиналом (как и штрафные очки ниже) — стоит перепроверить перед тем,
+// как полагаться на точные цифры
+const STATIONS_PER_PLAYER = 3;
+const STATION_UNUSED_PENALTY = 4; // очков вычитается в конце игры за каждую неиспользованную станцию
 
 function emptyHand() {
   const hand = { [rules.LOCOMOTIVE]: 0 };
@@ -42,6 +47,11 @@ class TicketToRideGame {
     this.routeOwner = {}; // routeId -> playerId (обратный индекс для быстрой проверки занятости)
     this.pendingInitialTickets = {}; // playerId -> [ticket,...] пока не подтвердил выбор
     this.keptTickets = {}; // playerId -> [ticket,...]
+    this.stationsLeft = {}; // playerId -> number, стартуют с STATIONS_PER_PLAYER
+    // playerId -> Set<routeId> — ЧУЖИЕ маршруты, разблокированные станциями
+    // этого игрока: считаются связанными для проверки ЕГО билетов, но не
+    // приносят очков за длину и не участвуют в бонусе "самый длинный путь"
+    this.stationLinks = {};
 
     this.deck = rules.buildTrainDeck();
     this.discard = [];
@@ -61,6 +71,8 @@ class TicketToRideGame {
       this.trainsLeft[id] = rules.TRAINS_PER_PLAYER;
       this.score[id] = 0;
       this.ownedRoutes[id] = new Set();
+      this.stationsLeft[id] = STATIONS_PER_PLAYER;
+      this.stationLinks[id] = new Set();
       // стартовая рука по правилам — HAND_SIZE_INITIAL вагонных карт из колоды
       for (let i = 0; i < rules.HAND_SIZE_INITIAL; i++) addToHand(this.hands[id], this.deck.pop());
     });
@@ -103,6 +115,10 @@ class TicketToRideGame {
     Object.entries(data.ownedRoutes || {}).forEach(([pid, arr]) => {
       game.ownedRoutes[pid] = new Set(arr);
     });
+    game.stationLinks = {};
+    Object.entries(data.stationLinks || {}).forEach(([pid, arr]) => {
+      game.stationLinks[pid] = new Set(arr);
+    });
     return game;
   }
 
@@ -115,6 +131,10 @@ class TicketToRideGame {
       score: this.score,
       ownedRoutes: Object.fromEntries(
         Object.entries(this.ownedRoutes).map(([pid, set]) => [pid, [...set]])
+      ),
+      stationsLeft: this.stationsLeft,
+      stationLinks: Object.fromEntries(
+        Object.entries(this.stationLinks).map(([pid, set]) => [pid, [...set]])
       ),
       routeOwner: this.routeOwner,
       pendingInitialTickets: this.pendingInitialTickets,
@@ -187,15 +207,21 @@ class TicketToRideGame {
     this.phase = 'finished';
     this.finished = true;
 
-    // билеты: выполненные — плюс очки, невыполненные — минус
+    // билеты: выполненные — плюс очки, невыполненные — минус. Станции
+    // считаются связностью наравне со своими маршрутами (см. stationLinks),
+    // но НЕ участвуют в бонусе за длинный путь ниже — это отдельно от
+    // билетов, только настоящие построенные маршруты
     this.playerIds.forEach((pid) => {
+      const connected = new Set([...(this.ownedRoutes[pid] || []), ...(this.stationLinks[pid] || [])]);
       (this.keptTickets[pid] || []).forEach((t) => {
-        const ok = rules.ticketFulfilled(t, this.ownedRoutes[pid]);
+        const ok = rules.ticketFulfilled(t, connected);
         this.score[pid] += ok ? t.points : -t.points;
       });
+      // штраф за неиспользованные станции
+      this.score[pid] -= STATION_UNUSED_PENALTY * (this.stationsLeft[pid] || 0);
     });
 
-    // бонус за самый длинный путь
+    // бонус за самый длинный путь — только реально построенные маршруты
     let bestPid = null;
     let bestLen = -1;
     this.playerIds.forEach((pid) => {
@@ -319,6 +345,45 @@ class TicketToRideGame {
     return { ok: true, built: true };
   }
 
+  // станция ставится прямо на уже занятый ЧУЖОЙ маршрут (не на город) —
+  // после этого он считается связанным с сетью игрока для его билетов
+  // (см. использование stationLinks в finishGame/viewFor), но не приносит
+  // очков за длину и не идёт в зачёт бонуса за самый длинный путь. Стоимость
+  // растёт с каждой следующей станцией: 1-я — 1 карта одного цвета, 2-я — 2,
+  // 3-я — 3 (см. STATIONS_PER_PLAYER)
+  buildStation(playerId, routeId, payment) {
+    if (this.phase !== 'playing' && this.phase !== 'final-round') return { error: 'Сейчас нельзя строить станцию' };
+    if (this.currentPlayerId() !== playerId) return { error: 'Сейчас не ваш ход' };
+    if (this.pendingTunnel) return { error: 'Сначала разрешите ситуацию с туннелем' };
+    if ((this.stationsLeft[playerId] || 0) <= 0) return { error: 'Станции закончились' };
+
+    const ownerId = this.routeOwner[routeId];
+    if (!ownerId) return { error: 'Станцию можно ставить только на уже занятый чужой маршрут' };
+    if (ownerId === playerId) return { error: 'Это ваш собственный маршрут' };
+    if (this.stationLinks[playerId].has(routeId)) return { error: 'Здесь уже стоит ваша станция' };
+
+    const cost = STATIONS_PER_PLAYER + 1 - this.stationsLeft[playerId]; // 1-я станция стоит 1, 2-я — 2, 3-я — 3
+    const entries = Object.entries(payment || {}).filter(([, n]) => n > 0);
+    const total = entries.reduce((sum, [, n]) => sum + n, 0);
+    if (total !== cost) return { error: `Нужно ровно ${cost} карт(ы) одного цвета` };
+    const nonLoco = entries.filter(([color]) => color !== rules.LOCOMOTIVE);
+    if (nonLoco.length > 1) return { error: 'Можно платить только одним цветом (плюс любое число локомотивов)' };
+
+    const hand = this.hands[playerId];
+    for (const [color, n] of entries) {
+      if ((hand[color] || 0) < n) return { error: `Не хватает карт цвета ${color}` };
+    }
+
+    entries.forEach(([color, n]) => {
+      hand[color] -= n;
+      this.discard.push(...Array(n).fill(color));
+    });
+    this.stationsLeft[playerId] -= 1;
+    this.stationLinks[playerId].add(routeId);
+    this.advanceTurn();
+    return { ok: true };
+  }
+
   _commitRouteClaim(playerId, route, payment) {
     const hand = this.hands[playerId];
     Object.entries(payment).forEach(([color, n]) => {
@@ -410,12 +475,16 @@ class TicketToRideGame {
         score: this.score[id],
         handSize: Object.values(this.hands[id]).reduce((a, b) => a + b, 0),
         ticketCount: (this.keptTickets[id] || []).length,
+        stationsLeft: this.stationsLeft[id],
       })),
       faceUp: this.faceUp,
       deckCount: this.deck.length,
       discardCount: this.discard.length,
       ticketDeckCount: this.ticketDeck.length,
       routeOwner: this.routeOwner, // routeId -> playerId, клиент красит по этому + playerColor выше
+      // станции — не секрет, физические жетоны на общей карте; плоский
+      // список {routeId, playerId} для отрисовки чёрточек на маршрутах
+      stationMarkers: this.playerIds.flatMap((id) => [...this.stationLinks[id]].map((routeId) => ({ routeId, playerId: id }))),
       winner: this.winner,
       winReason: this.winReason,
       // пока не выбрали билеты вообще все — фаза не переходит в 'playing'
@@ -426,24 +495,26 @@ class TicketToRideGame {
         : [],
     };
 
-    // маршруты, которые прямо сейчас реально соединяют города одного из
-    // МОИХ билетов через МОЮ собственную сеть — клиент красит их отдельным
-    // цветом (билет выполнен), а не обычным цветом владения. Билеты чужие
-    // не знаем — считаем только для запрашивающего игрока (это приватность,
-    // не публичное поле base)
-    const myFulfilledTicketRouteIds = new Set();
-    (this.keptTickets[playerId] || []).forEach((ticket) => {
-      const path = rules.ticketConnectingRoutes(ticket, this.ownedRoutes[playerId] || new Set());
-      if (path) path.forEach((routeId) => myFulfilledTicketRouteIds.add(routeId));
-    });
+    // выполнен ли билет прямо сейчас (города уже связаны МОЕЙ собственной
+    // сетью — включая чужие маршруты, разблокированные моими станциями) —
+    // приватно для самого игрока (билеты чужих игроков нам неизвестны),
+    // клиент подсвечивает сам билет в списке, а не маршрут на карте —
+    // маршрут всегда остаётся окрашен в цвет владельца
+    const myConnectedRoutes = new Set([
+      ...(this.ownedRoutes[playerId] || []),
+      ...(this.stationLinks[playerId] || []),
+    ]);
+    const myTickets = (this.keptTickets[playerId] || []).map((ticket) => ({
+      ...ticket,
+      fulfilled: rules.ticketFulfilled(ticket, myConnectedRoutes),
+    }));
 
     return {
       ...base,
       myHand: this.hands[playerId],
-      myTickets: this.keptTickets[playerId] || [],
+      myTickets,
       myPendingTickets: this.pendingInitialTickets[playerId] || null,
       myPendingTicketsMinKeep: this.phase === 'initial-tickets' ? 2 : 1,
-      myFulfilledTicketRouteIds: [...myFulfilledTicketRouteIds],
       pendingTunnel: (this.pendingTunnel && this.pendingTunnel.playerId === playerId) ? this.pendingTunnel : null,
     };
   }

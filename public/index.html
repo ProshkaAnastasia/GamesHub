@@ -44,7 +44,7 @@
 
         <p id="landing-error" class="error-text" hidden></p>
 
-        <button id="btn-list-rooms" class="btn-link">🌐 Все активные комнаты</button>
+        <button id="btn-list-rooms" class="btn-link">🌐 Все комнаты</button>
       </div>
     </div>
   </section>
@@ -311,7 +311,7 @@
   <!-- СПИСОК КОМНАТ — доступен только с экрана входа, до создания/входа в комнату -->
   <aside id="rooms-panel" class="history-panel" hidden>
     <div class="history-head">
-      <span>Активные комнаты</span>
+      <span>Все комнаты</span>
       <button id="btn-close-rooms" class="btn-icon">✕</button>
     </div>
     <div id="rooms-list" class="rooms-list"></div>
@@ -359,8 +359,15 @@
       <button id="btn-close-chat" class="btn-icon">✕</button>
     </div>
     <div id="chat-messages" class="chat-messages"></div>
+    <div id="chat-reply-preview" class="chat-reply-preview" hidden>
+      <div class="chat-reply-preview-text">
+        <span class="chat-reply-preview-name"></span>
+        <span class="chat-reply-preview-snippet"></span>
+      </div>
+      <button type="button" id="btn-chat-reply-cancel" class="btn-icon">✕</button>
+    </div>
     <form id="chat-form" class="chat-form">
-      <input id="chat-input" type="text" maxlength="300" placeholder="Написать сообщение…" autocomplete="off">
+      <textarea id="chat-input" maxlength="300" placeholder="Написать сообщение…" rows="1"></textarea>
       <button type="submit" class="btn btn-primary chat-send-btn">➤</button>
     </form>
   </aside>

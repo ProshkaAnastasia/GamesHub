@@ -655,24 +655,109 @@ h1 {
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-.chat-msg { font-size: 13px; line-height: 1.4; }
-.chat-msg .chat-msg-name { font-weight: 700; margin-right: 6px; }
-.chat-msg.mine { text-align: right; }
-.chat-msg.team-a .chat-msg-name { color: var(--team-a); }
-.chat-msg.team-b .chat-msg-name { color: var(--team-b); }
-.chat-msg-text { color: var(--text); word-break: break-word; }
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 82%;
+  align-self: flex-start;
+}
+.chat-msg.mine { align-self: flex-end; align-items: flex-end; }
+/* сообщение подряд от того же автора — имя не повторяем, отступ меньше */
+.chat-msg.grouped { margin-top: -6px; }
+.chat-msg-name {
+  font-weight: 700;
+  font-size: 12px;
+  margin: 0 4px 3px;
+  color: var(--chat-color, var(--text-muted));
+}
+.chat-bubble {
+  position: relative;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 7px 10px;
+}
+/* .chat-msg-time — float внутри этого блока (см. ниже), без clearfix
+   плавающий элемент выпадал бы из потока и пузырь не учитывал бы его
+   высоту при переносе на несколько строк */
+.chat-bubble::after { content: ""; display: table; clear: both; }
+.chat-msg.mine .chat-bubble { background: var(--accent-dim); border-color: var(--accent-dim); }
+.chat-msg-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+/* float, а не отдельная строка снизу — время встаёт в конец последней
+   строки текста (как в обычных мессенджерах), а не под всем сообщением */
+.chat-msg-time {
+  float: right;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin: 3px 0 0 8px;
+}
+.chat-reply-quote {
+  border-left: 2px solid var(--accent);
+  padding: 2px 8px;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.chat-reply-quote b { color: var(--text); }
+.chat-reply-btn {
+  align-self: flex-end;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  padding: 2px 6px;
+  transition: opacity 0.15s ease;
+}
+.chat-msg:hover .chat-reply-btn { opacity: 1; }
+.chat-msg.mine .chat-reply-btn { align-self: flex-start; }
+
+.chat-reply-preview[hidden] { display: none; }
+.chat-reply-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-raised);
+  flex-shrink: 0;
+}
+.chat-reply-preview-text { min-width: 0; font-size: 12px; }
+.chat-reply-preview-name { font-weight: 700; color: var(--accent); margin-right: 6px; }
+.chat-reply-preview-snippet {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-reply-preview .btn-icon { width: 28px; height: 28px; flex-shrink: 0; }
+
 .chat-form {
   display: flex;
+  align-items: flex-end;
   gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
-.chat-form input {
+.chat-form textarea {
   flex: 1;
   min-width: 0;
+  resize: none;
+  max-height: 120px;
+  min-height: 40px;
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
@@ -680,9 +765,10 @@ h1 {
   border-radius: var(--radius);
   font-size: 14px;
   font-family: var(--font-body);
+  line-height: 1.3;
 }
-.chat-form input:focus { outline: none; border-color: var(--accent); }
-.chat-send-btn { width: 44px; padding: 0; flex-shrink: 0; }
+.chat-form textarea:focus { outline: none; border-color: var(--accent); }
+.chat-send-btn { width: 44px; height: 40px; padding: 0; flex-shrink: 0; }
 .history-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-weight: 700; }
 
 .history-tabs { display: flex; gap: 6px; margin-bottom: 16px; }
@@ -935,6 +1021,18 @@ h1 {
   stroke-width: 30px;
   paint-order: stroke;
 }
+/* подсказка пути по клику на билет — не завязана на :hover/ttr-claimable
+   (должна работать и в чужой ход), и заметно ярче/толще обычного hover'а,
+   чтобы явно читаться как отдельная, более настойчивая подсказка */
+.ttr-map-container [id^="route_"].ttr-suggested,
+.ttr-map-container [id^="route_"].ttr-suggested rect,
+.ttr-map-container [id^="route_"].ttr-suggested path {
+  /* золотой сливался с игровым жёлтым цветом маршрутов (#FFCC00) — маджента
+     не встречается вообще ни у одного игрового/командного цвета на карте */
+  stroke: #ff17c1;
+  stroke-width: 55px;
+  paint-order: stroke;
+}
 .ttr-map-container .ttr-selected,
 .ttr-map-container .ttr-selected rect,
 .ttr-map-container .ttr-selected path,
@@ -962,6 +1060,12 @@ h1 {
 }
 .ttr-city-highlight circle:first-child { r: 150px; }
 .ttr-city-highlight circle:last-child { r: 75px; }
+
+/* чисто декоративная метка станции — без этого она перехватывала бы клик
+   по маршруту под собой (особенно заметно на коротких маршрутах, где
+   метка почти во всю длину пути), и второй игрок не смог бы кликнуть туда,
+   чтобы тоже поставить станцию */
+.ttr-station-mark { pointer-events: none; }
 
 .ttr-zoom-controls {
   position: absolute;
@@ -997,23 +1101,38 @@ h1 {
 
 .ttr-card {
   --ttr-card-color: #999;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: var(--ttr-card-color);
-  border: 1px solid rgba(0,0,0,0.25);
-  color: #0a0d10;
-  font-size: 12px;
-  font-weight: 700;
+  position: relative;
+  display: inline-block;
+  width: 150px;
+  height: 216px;
+  border-radius: 14px;
+  /* цвет — фолбэк снизу (пока картинка не загрузилась и на случай, если
+     для цвета вообще нет файла в public/ttr/cards/); сама картинка карты
+     рисуется поверх через background-image в ttrCardBgStyle() */
+  background-color: var(--ttr-card-color);
+  background-size: cover;
+  background-position: center;
+  border: 2px solid rgba(0,0,0,0.35);
   padding: 0;
+}
+.ttr-card b {
+  position: absolute;
+  right: -10px;
+  bottom: -12px;
+  min-width: 30px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #0a0d10;
+  color: #fff;
+  font-size: 19px;
+  font-weight: 700;
+  text-align: center;
+  border: 2px solid rgba(255, 255, 255, 0.5);
 }
 .ttr-faceup-btn { cursor: pointer; }
 .ttr-faceup-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.ttr-hand { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; min-height: 34px; }
+.ttr-hand { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; min-height: 216px; }
 
 .ttr-tickets-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .ttr-tickets { display: flex; flex-direction: column; gap: 6px; }
@@ -1025,8 +1144,25 @@ h1 {
   border-radius: var(--radius);
   padding: 8px 12px;
   font-size: 13px;
-  cursor: default;
+  cursor: pointer;
   user-select: none;
+}
+/* билет выполнен — города уже связаны собственной сетью маршрутов;
+   подсвечиваем сам билет в списке, а не маршрут на карте (маршрут всегда
+   остаётся в цвете владельца) */
+.ttr-ticket-fulfilled {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+/* сейчас показывается подсказка пути именно для этого билета — тот же
+   цвет, что и подсветка на карте (.ttr-suggested), чтобы было видно,
+   какой билет к какому пути относится. Не трогает background/color —
+   спокойно комбинируется с .ttr-ticket-fulfilled (билет может быть и
+   выполнен, и выбран одновременно) */
+.ttr-ticket-active {
+  border-color: #ff17c1;
+  box-shadow: 0 0 0 2px rgba(255, 23, 193, 0.4);
 }
 
 .ttr-overlay {
