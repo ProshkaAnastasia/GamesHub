@@ -298,10 +298,10 @@ class TicketToRideGame {
       this.discard.push(...revealed);
       if (extraNeeded === 0) {
         this._commitRouteClaim(playerId, route, payment);
-        return { ok: true, tunnel: { revealed, extraNeeded: 0, autoResolved: true } };
+        return { ok: true, tunnel: { revealed, extraNeeded: 0, colorUsed: check.colorUsed, autoResolved: true } };
       }
       this.pendingTunnel = { playerId, routeId, payment, colorUsed: check.colorUsed, extraNeeded, revealed };
-      return { ok: true, tunnel: { revealed, extraNeeded, autoResolved: false } };
+      return { ok: true, tunnel: { revealed, extraNeeded, colorUsed: check.colorUsed, autoResolved: false } };
     }
 
     this._commitRouteClaim(playerId, route, payment);

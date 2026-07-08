@@ -709,19 +709,8 @@ h1 {
   background: rgba(255, 255, 255, 0.04);
 }
 .chat-reply-quote b { color: var(--text); }
-.chat-reply-btn {
-  align-self: flex-end;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  opacity: 0;
-  padding: 2px 6px;
-  transition: opacity 0.15s ease;
-}
-.chat-msg:hover .chat-reply-btn { opacity: 1; }
-.chat-msg.mine .chat-reply-btn { align-self: flex-start; }
+/* ответ вызывается правым кликом по сообщению (contextmenu, см. app.js),
+   отдельной кнопки в разметке больше нет — курсор просто обычный */
 
 .chat-reply-preview[hidden] { display: none; }
 .chat-reply-preview {
@@ -978,7 +967,14 @@ h1 {
 .btn-small { padding: 8px 14px; font-size: 13px; }
 
 /* ---------- Ticket to Ride ---------- */
-.ttr-wrap { max-width: 1280px; margin: 0 auto; }
+/* --ttr-cards-w тут, а не на самих .ttr-map-container/.ttr-panel — оба
+   должны быть одной ширины (наследуется вниз по дереву). Величина не
+   произвольная: .ttr-deck-row — grid из 150px-колонок с gap 10px (6 колонок:
+   колода + 5 открытых карт), нужно 6×150+5×10+паддинг панели 16px×2=982px
+   как минимум, чтобы влезло 6 колонок в один ряд, а не 5 (auto-fill сам
+   уронит лишнее на новую строку, если не хватит места). Небольшой запас
+   сверх 982, чтобы не залипать ровно на границе округления. */
+.ttr-wrap { max-width: 1280px; margin: 0 auto; --ttr-cards-w: 1000px; }
 
 .ttr-turn-indicator {
   text-align: center;
@@ -992,22 +988,40 @@ h1 {
 .ttr-roster-chip.ttr-turn { border-color: var(--accent); color: var(--text); }
 .ttr-roster-stats { color: var(--text-muted); font-size: 11px; }
 
-.ttr-map-wrap { position: relative; margin-bottom: 16px; }
+.ttr-map-wrap { position: relative; margin-bottom: 16px; text-align: center; }
 .ttr-map-container {
   position: relative;
-  width: 100%;
-  height: 80vh;
-  overflow: auto;
+  display: inline-block;
+  vertical-align: top;
+  /* контейнер сам принимает пропорции карты (viewBox 14472×11804) в
+     рамках доступной ширины — раньше контейнер был прямоугольником
+     произвольной формы, пропорции которого сильно отличались от карты, и
+     "meet"-вписывание оставляло пустые поля по бокам ("рамку"). Ширина —
+     --ttr-cards-w (см. .ttr-wrap), та же, что у .ttr-panel ниже, чтобы
+     область карты и область карт под ней совпадали; aspect-ratio сам
+     считает высоту из этой ширины, обрезки/полей нет. */
+  width: min(100%, var(--ttr-cards-w));
+  aspect-ratio: 14472 / 11804;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
   /* карта нарисована штрихом по светлому фону (заливки-контуры без своего
      фона) — на тёмном фоне приложения её почти не видно */
   background: #ffffff;
+  /* пан/зум теперь свой (JS двигает transform на <svg>, см. app.js),
+     нативный скролл/жесты браузера тут будут только мешать — колесо мыши
+     иначе скроллило бы страницу, а пальцем браузер пытался бы зумить всю
+     страницу параллельно с нашим pinch-обработчиком */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
-/* SVG не резинится под контейнер — ширина меняется JS-ом (масштаб), высота
-   всегда авто по viewBox, поэтому именно overflow:auto даёт скролл/панораму */
-.ttr-map-container svg { display: block; width: 100%; height: auto; }
+/* размер и позиция SVG выставляются в JS (ttrRefitMapSize/applyTtrTransform
+   в app.js) — тут только то, что не меняется по кадрам */
+.ttr-map-container svg { display: block; transform-origin: 0 0; will-change: transform; }
 .ttr-map-container [id^="route_"] { transition: stroke 0.15s ease, stroke-width 0.15s ease; }
+/* курсор-рука только тут — над доступным для покупки маршрутом, нигде
+   больше на карте (в т.ч. во время панорамирования) руки быть не должно */
 .ttr-map-container [id^="route_"].ttr-claimable { cursor: pointer; }
 /* наведение — через stroke, а не filter:brightness(): у части браузеров
    CSS-фильтры на SVG-группах не применяются вовсе (наведение было не видно
@@ -1067,44 +1081,54 @@ h1 {
    чтобы тоже поставить станцию */
 .ttr-station-mark { pointer-events: none; }
 
-.ttr-zoom-controls {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* та же ширина, что у .ttr-map-container (общая --ttr-cards-w с .ttr-wrap,
+   см. её расчёт там) — область карты и область руки/колоды/билетов должны
+   совпадать по ширине */
+.ttr-panel {
+  width: min(100%, var(--ttr-cards-w));
+  margin: 0 auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 6px;
+  padding: 16px;
 }
 
-.ttr-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-
-.ttr-deck-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+/* колода + открытые карты — CSS-grid с фиксированными 150px-колонками,
+   а не flex: у .ttr-hand ниже ровно та же сетка (те же колонки/gap), так
+   что карты руки всегда попадают в те же вертикальные "столбцы", что и
+   колода/открытые карты сверху, а не съезжают на произвольный флекс-отступ */
+.ttr-deck-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 150px);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+/* класс .ttr-card даёт те же пропорции/рамку/скругление и стиль бейджа
+   счётчика (b), что у карт руки/открытых карт — рубашка колоды выглядит
+   как та же самая карта, просто повёрнутая лицом вниз, и остаётся того
+   же размера, что и все остальные карты в игре */
 .ttr-deck-pile {
-  border: 1px solid var(--border);
-  background: var(--panel-raised);
-  color: var(--text);
-  border-radius: var(--radius);
-  padding: 10px 14px;
-  font-size: 18px;
+  position: relative;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  background-image: url(/ttr/cards/card-back.png);
 }
 .ttr-deck-pile:disabled { opacity: 0.5; cursor: not-allowed; }
-.ttr-faceup-row { display: flex; gap: 6px; flex-wrap: wrap; }
-.ttr-discard-pile { margin-left: auto; color: var(--text-muted); font-size: 13px; }
+/* display:contents — сама обёртка не создаёт бокс и не участвует в сетке,
+   но её дети (открытые карты) становятся прямыми grid-item'ами
+   .ttr-deck-row и встают в те же колонки, что и рубашка колоды слева от них */
+.ttr-faceup-row { display: contents; }
 
 .ttr-card {
   --ttr-card-color: #999;
   position: relative;
   display: inline-block;
   width: 150px;
-  height: 216px;
+  /* картинки карт — 1024×1536 (см. public/ttr/cards/), а не 150×216 —
+     старое соотношение (0.694) было немного уже реального (0.667), и
+     background-size:cover обрезал картинку по высоте, съедая часть её
+     собственной декоративной рамки. aspect-ratio точно по картинке —
+     обрезки нет вообще, рамка вокруг карты (border ниже) совпадает с ней. */
+  aspect-ratio: 1024 / 1536;
   border-radius: 14px;
   /* цвет — фолбэк снизу (пока картинка не загрузилась и на случай, если
      для цвета вообще нет файла в public/ttr/cards/); сама картинка карты
@@ -1129,37 +1153,71 @@ h1 {
   text-align: center;
   border: 2px solid rgba(255, 255, 255, 0.5);
 }
-.ttr-faceup-btn { cursor: pointer; }
+.ttr-faceup-btn { cursor: pointer; transition: transform 0.15s ease; }
 .ttr-faceup-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* совсем небольшое увеличение при наведении — только пока карту реально
+   можно взять (не в чужой ход и т.д., см. :disabled) */
+.ttr-faceup-btn:not(:disabled):hover { transform: scale(1.08); z-index: 5; }
 
-.ttr-hand { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; min-height: 216px; }
+/* та же сетка (150px-колонки, gap 10px), что у .ttr-deck-row — карты руки
+   встают строго под колодой/открытыми картами, без сдвига */
+.ttr-hand { display: grid; grid-template-columns: repeat(auto-fill, 150px); gap: 10px; margin-bottom: 16px; min-height: 225px; }
 
-.ttr-tickets-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.ttr-tickets { display: flex; flex-direction: column; gap: 6px; }
-.ttr-ticket-row {
-  display: flex;
-  justify-content: space-between;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 12px;
-  font-size: 13px;
+/* ширина строго под 2 билета в ряд (2×3 колонки = 6×150px + 5×10px гэпов
+   = 950px) — раньше строка растягивалась на всю ширину панели (968px), и
+   кнопка справа заканчивалась на ~18px дальше правого края второго билета
+   вместо ровно на нём. .btn задаёт width:100%, so кнопка сама растягивается
+   и занимает всё, что осталось после надписи (начинается сразу за ней),
+   но теперь это "всё" — только до границы в 950px, а не до края панели */
+.ttr-tickets-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; max-width: 950px; }
+.ttr-tickets-head .field-label { flex-shrink: 0; }
+/* та же сетка (150px-колонки, gap 10px), что у .ttr-deck-row/.ttr-hand —
+   билет занимает ровно 3 ячейки (grid-column: span 3 ниже), поэтому его
+   ширина всегда СТРУКТУРНО (не просто визуально похожим числом) равна
+   ширине трёх карт цвета + два внутренних гэпа между ними */
+.ttr-tickets { display: grid; grid-template-columns: repeat(auto-fill, 150px); gap: 10px; }
+/* билет — настоящая картинка карточки из public/ttr/tickets (от/до/очки уже
+   нарисованы на ней самой), а не текстовая строка; short/long — разные
+   папки и слегка разные (но обе широкоформатные) пропорции исходников,
+   aspect-ratio точно по разрешению картинки — обрезки/растяжения нет */
+.ttr-ticket-card {
+  grid-column: span 3;
+  position: relative;
+  border-radius: 10px;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--panel-raised);
+  border: 2px solid var(--border);
   cursor: pointer;
-  user-select: none;
+  padding: 0;
+  font-family: inherit;
+  /* при наведении карточка увеличивается — читать мелкие подписи городов
+     на карте билета иначе тяжело. transform не занимает места в потоке
+     (соседи не двигаются), z-index — чтобы увеличенная карта была поверх
+     соседних, а не под ними */
+  transition: transform 0.15s ease;
 }
+/* увеличение только у уже полученных билетов (.ttr-ticket-row, список
+   "Мои билеты"), не у карточек в оверлее выбора (.ttr-ticket-pick) — там
+   при выборе билетов резкий зум курсором только мешал бы сравнивать карты */
+.ttr-ticket-row.ttr-ticket-card:hover {
+  transform: scale(1.4);
+  z-index: 5;
+}
+.ttr-ticket-card.ttr-ticket-short { aspect-ratio: 1376 / 768; }
+.ttr-ticket-card.ttr-ticket-long { aspect-ratio: 1677 / 938; }
 /* билет выполнен — города уже связаны собственной сетью маршрутов;
    подсвечиваем сам билет в списке, а не маршрут на карте (маршрут всегда
    остаётся в цвете владельца) */
 .ttr-ticket-fulfilled {
   border-color: var(--accent);
-  background: var(--accent-dim);
-  color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 227, 139, 0.4);
 }
 /* сейчас показывается подсказка пути именно для этого билета — тот же
    цвет, что и подсветка на карте (.ttr-suggested), чтобы было видно,
-   какой билет к какому пути относится. Не трогает background/color —
-   спокойно комбинируется с .ttr-ticket-fulfilled (билет может быть и
-   выполнен, и выбран одновременно) */
+   какой билет к какому пути относится. Комбинируется с .ttr-ticket-fulfilled
+   (билет может быть и выполнен, и выбран одновременно) — обводка ставится
+   в последнюю очередь ниже по каскаду и перебивает цвет рамки */
 .ttr-ticket-active {
   border-color: #ff17c1;
   box-shadow: 0 0 0 2px rgba(255, 23, 193, 0.4);
@@ -1189,22 +1247,22 @@ h1 {
 .ttr-overlay-panel h3 { margin: 0 0 10px; }
 .ttr-overlay-actions { display: flex; gap: 10px; margin-top: 16px; }
 .ttr-overlay-actions .btn { flex: 1; }
+/* тоннель показывает 3 вскрытые карты полного размера (.ttr-card, 150px) в
+   один ряд — обычной ширины оверлея (480px) на это не хватает, из-за чего
+   карты переносились и наезжали друг на друга внутри текстового абзаца.
+   Отдельный контейнер под карты (.ttr-tunnel-revealed) + более широкая
+   панель именно для этого оверлея. */
+.ttr-tunnel-overlay-panel { max-width: 530px; }
+.ttr-tunnel-revealed { display: flex; gap: 10px; margin-bottom: 14px; }
+/* карточки билетов (.ttr-ticket-card) — 470px, обычной ширины оверлея
+   (480px) на это уже не хватит с паддингами — своя, более широкая панель */
+.ttr-ticket-overlay-panel { max-width: 540px; }
 
-.ttr-ticket-picker-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
-.ttr-ticket-pick {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  color: var(--text);
-  font-family: var(--font-body);
-  cursor: pointer;
-  text-align: left;
-}
-.ttr-ticket-pick.selected { border-color: var(--accent); color: var(--accent); }
+/* та же сетка, что и у .ttr-tickets — тут это отдельный оверлей, поэтому
+   центрируем (justify-content), а не выравниваем по левому краю, как в
+   общей табличной сетке карт */
+.ttr-ticket-picker-list { display: grid; grid-template-columns: repeat(auto-fill, 150px); justify-content: center; gap: 10px; margin: 12px 0; }
+.ttr-ticket-pick.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 227, 139, 0.4); }
 
 .ttr-payment-cards { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
 .ttr-payment-tile { display: flex; align-items: center; gap: 10px; }
@@ -1232,5 +1290,4 @@ h1 {
   .word-slots { grid-template-columns: repeat(2, 1fr); }
   h1 { font-size: 24px; }
   .assoc-word-grid { grid-template-columns: 1fr; }
-  .ttr-map-container { height: 55vh; }
 }

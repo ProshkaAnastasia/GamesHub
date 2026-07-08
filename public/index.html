@@ -215,22 +215,14 @@
         <div id="ttr-map-container" class="ttr-map-container">
           <p class="hint-text">Загрузка карты…</p>
         </div>
-        <div class="ttr-zoom-controls">
-          <button type="button" id="ttr-zoom-out" class="btn-icon" title="Уменьшить">−</button>
-          <button type="button" id="ttr-zoom-reset" class="btn-icon" title="Сбросить масштаб">⤢</button>
-          <button type="button" id="ttr-zoom-in" class="btn-icon" title="Увеличить">+</button>
-        </div>
       </div>
 
       <div class="ttr-panel">
         <div class="ttr-deck-row">
-          <button id="ttr-draw-deck" class="ttr-deck-pile" title="Тянуть из колоды">
-            🂠 <span id="ttr-deck-count">0</span>
+          <button id="ttr-draw-deck" class="ttr-card ttr-deck-pile" title="Тянуть из колоды">
+            <b id="ttr-deck-count">0</b>
           </button>
           <div id="ttr-faceup-row" class="ttr-faceup-row"></div>
-          <div class="ttr-discard-pile" title="Сброс">
-            🗑 <span id="ttr-discard-count">0</span>
-          </div>
         </div>
 
         <div class="ttr-hand" id="ttr-hand"></div>
@@ -245,7 +237,7 @@
 
     <!-- выбор билетов (стартовый набор или после «Взять билеты») -->
     <div id="ttr-ticket-picker" class="ttr-overlay" hidden>
-      <div class="ttr-overlay-panel">
+      <div class="ttr-overlay-panel ttr-ticket-overlay-panel">
         <h3>Выберите билеты</h3>
         <p id="ttr-ticket-picker-hint" class="hint-text"></p>
         <div id="ttr-ticket-picker-list" class="ttr-ticket-picker-list"></div>
@@ -268,13 +260,15 @@
 
     <!-- туннель: карты вскрыты, решаем, доплачивать ли -->
     <div id="ttr-tunnel-panel" class="ttr-overlay" hidden>
-      <div class="ttr-overlay-panel">
+      <div class="ttr-overlay-panel ttr-tunnel-overlay-panel">
         <h3>Туннель!</h3>
+        <div id="ttr-tunnel-revealed" class="ttr-tunnel-revealed"></div>
         <p id="ttr-tunnel-text"></p>
         <div id="ttr-tunnel-cards" class="ttr-payment-cards"></div>
         <div class="ttr-overlay-actions">
           <button id="btn-ttr-tunnel-decline" class="btn btn-secondary">Отказаться</button>
           <button id="btn-ttr-tunnel-pay" class="btn btn-primary" disabled>Доплатить</button>
+          <button id="btn-ttr-tunnel-ok" class="btn btn-primary" hidden>Ок</button>
         </div>
       </div>
     </div>

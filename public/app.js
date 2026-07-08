@@ -1163,6 +1163,11 @@
   let ttrPaymentState = null; // { routeId, payment: {color: n} } — открытая панель оплаты маршрута
   let ttrTunnelRouteId = null; // routeId текущего pendingTunnel — чтобы не сбрасывать черновик доплаты зря
   let ttrTunnelDraft = {};
+  // сразу после ответа emit('claim-route', ...) на туннельный маршрут — не
+  // дожидаясь следующего broadcast view (иначе панель с вскрытыми картами
+  // иногда не успевала бы показаться вовремя, а если доплата не нужна вовсе
+  // — view.pendingTunnel никогда и не появится, сервер коммитит маршрут сразу)
+  let ttrTunnelLocal = null; // { routeId, payment, revealed, extraNeeded, colorUsed, autoResolved }
   let ttrTicketPickerKey = null; // "from-to|from-to..." текущего показанного набора билетов
   let ttrTicketPickerSelected = new Set();
   let ttrSuggestedPath = null; // { idx, from, to, routeIds: Set<routeId> } — подсказка пути по клику на билет
@@ -1228,7 +1233,7 @@
     if (!ttrAssetsPromise) {
       ttrAssetsPromise = Promise.all([
         fetch('/api/ttr/map').then(r => r.json()),
-        fetch('/ttr/ttr-map.svg').then(r => r.text()),
+        fetch('/ttr/ttr-map-new.svg').then(r => r.text()),
       ]).then(([mapData, svgText]) => {
         const citiesById = {};
         mapData.cities.forEach(c => { citiesById[c.id] = c; });
@@ -1247,14 +1252,80 @@
       && !view.myPendingTickets;
   }
 
+  // --- пан/зум карты: единый transform (translate+scale) на <svg>, без
+  // нативного скролла контейнера. Один и тот же стейт двигают четыре
+  // источника — колесо мыши (зум к курсору), pointer-события (мышь-драг
+  // и палец: один палец — пан, два — pinch-zoom, Pointer Events одинаково
+  // стреляют для мыши/тача/стилуса, поэтому код общий), стрелки на
+  // клавиатуре и кнопки +/-/сброс. clampTtrPan() после каждого изменения
+  // не даёт утащить карту за край контейнера (см. ниже).
   let ttrZoom = 1;
+  let ttrPanX = 0;
+  let ttrPanY = 0;
+  let ttrContW = 0;
+  let ttrContH = 0;
   const TTR_ZOOM_MIN = 1;
-  const TTR_ZOOM_MAX = 3;
-  const TTR_ZOOM_STEP = 0.25;
+  const TTR_ZOOM_MAX = 5;
+  const TTR_WHEEL_ZOOM_FACTOR = 1.15;
+  const TTR_KEY_PAN_STEP = 80;
+  const TTR_DRAG_CLICK_THRESHOLD = 6;
 
-  function applyTtrZoom() {
-    const svg = $('#ttr-map-container svg');
-    if (svg) svg.style.width = `${ttrZoom * 100}%`;
+  function ttrMapSvg() {
+    return $('#ttr-map-container svg');
+  }
+
+  // контейнер задаёт фиксированный размер, SVG рисуется ровно в этот
+  // размер (preserveAspectRatio="xMidYMid meet" — вся карта видна целиком,
+  // при несовпадении пропорций остаются белые поля по бокам, сливающиеся
+  // с фоном). Раз внешний бокс SVG всегда равен размеру контейнера, формула
+  // ограничения панорамы в clampTtrPan остаётся простой независимо от
+  // того, что внутри — обрезки самой карты при этом никогда не будет.
+  function ttrRefitMapSize() {
+    const container = $('#ttr-map-container');
+    const svg = ttrMapSvg();
+    if (!container || !svg) return;
+    ttrContW = container.clientWidth;
+    ttrContH = container.clientHeight;
+    svg.style.width = `${ttrContW}px`;
+    svg.style.height = `${ttrContH}px`;
+    clampTtrPan();
+    applyTtrTransform();
+  }
+
+  // не даёт карте уехать за пределы контейнера ни при каком zoom: край
+  // карты не может зайти за границу контейнера и обнажить пустоту
+  function clampTtrPan() {
+    const minPanX = Math.min(0, ttrContW - ttrContW * ttrZoom);
+    const minPanY = Math.min(0, ttrContH - ttrContH * ttrZoom);
+    ttrPanX = Math.max(minPanX, Math.min(0, ttrPanX));
+    ttrPanY = Math.max(minPanY, Math.min(0, ttrPanY));
+  }
+
+  function applyTtrTransform() {
+    const svg = ttrMapSvg();
+    if (svg) svg.style.transform = `translate(${ttrPanX}px, ${ttrPanY}px) scale(${ttrZoom})`;
+  }
+
+  // меняет zoom так, чтобы точка карты под anchorX/anchorY (курсор или
+  // середина между двумя пальцами) осталась под ним же — иначе зум "от
+  // угла" ощущается дёрганым
+  function ttrZoomAt(anchorX, anchorY, newZoom) {
+    newZoom = Math.max(TTR_ZOOM_MIN, Math.min(TTR_ZOOM_MAX, newZoom));
+    if (newZoom === ttrZoom) return;
+    const contentX = (anchorX - ttrPanX) / ttrZoom;
+    const contentY = (anchorY - ttrPanY) / ttrZoom;
+    ttrZoom = newZoom;
+    ttrPanX = anchorX - contentX * ttrZoom;
+    ttrPanY = anchorY - contentY * ttrZoom;
+    clampTtrPan();
+    applyTtrTransform();
+  }
+
+  function resetTtrZoom() {
+    ttrZoom = 1;
+    ttrPanX = 0;
+    ttrPanY = 0;
+    applyTtrTransform();
   }
 
   function mountTtrMap() {
@@ -1264,11 +1335,18 @@
     if (svg) {
       svg.removeAttribute('width');
       svg.removeAttribute('height');
+      // "meet" (не "slice"): контейнер сильно шире по пропорциям, чем
+      // карта — при slice/cover лишнее по высоте обрезалось бы навсегда
+      // (юг Италии/Палермо просто никогда не попадал бы в кадр ни при
+      // каком zoom, т.к. зум только увеличивает уже обрезанный кусок).
+      // meet показывает карту целиком с белыми полями по бокам (сливаются
+      // с белым фоном контейнера) — жертвуем немного эстетикой ради того,
+      // чтобы вся карта была реально достижима.
       svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
       buildTtrOwnerGradients(svg);
     }
-    ttrZoom = 1;
-    applyTtrZoom();
+    resetTtrZoom();
+    ttrRefitMapSize();
     closeTtrPayment();
   }
 
@@ -1454,7 +1532,6 @@
 
   function renderTtrDeckFaceUp(view) {
     $('#ttr-deck-count').textContent = view.deckCount;
-    $('#ttr-discard-count').textContent = view.discardCount;
     const canAct = ttrCanAct(view);
     $('#ttr-draw-deck').disabled = !canAct;
     $('#ttr-faceup-row').innerHTML = (view.faceUp || []).map((color, idx) => `
@@ -1567,40 +1644,80 @@
 
   function renderTtrTunnelPanel(view) {
     const panel = $('#ttr-tunnel-panel');
-    const pending = view.pendingTunnel;
-    if (!pending) { panel.hidden = true; ttrTunnelRouteId = null; return; }
+    // view.pendingTunnel — канонический источник (сервер), но между ack
+    // на claim-route и следующим broadcast'ом view проходит время, и если
+    // доплата вообще не нужна (autoResolved) — pendingTunnel на сервере
+    // никогда и не появляется. ttrTunnelLocal ставится сразу из ответа
+    // claim-route и служит запасным/единственным источником для этих
+    // случаев, view.pendingTunnel просто перебивает его, когда придёт.
+    const pending = view.pendingTunnel
+      || (ttrTunnelLocal && !ttrTunnelLocal.autoResolved ? ttrTunnelLocal : null);
+    const autoInfo = !view.pendingTunnel && ttrTunnelLocal && ttrTunnelLocal.autoResolved ? ttrTunnelLocal : null;
+
+    if (!pending && !autoInfo) { panel.hidden = true; ttrTunnelRouteId = null; return; }
     panel.hidden = false;
+
+    const revealed = (pending || autoInfo).revealed;
+    $('#ttr-tunnel-revealed').innerHTML = revealed.map(c => ttrCardTile(c)).join('');
+
+    if (autoInfo) {
+      $('#ttr-tunnel-text').textContent = 'Доплата не понадобилась — маршрут построен!';
+      $('#ttr-tunnel-cards').innerHTML = '';
+      $('#btn-ttr-tunnel-pay').hidden = true;
+      $('#btn-ttr-tunnel-decline').hidden = true;
+      $('#btn-ttr-tunnel-ok').hidden = false;
+      return;
+    }
+    $('#btn-ttr-tunnel-pay').hidden = false;
+    $('#btn-ttr-tunnel-decline').hidden = false;
+    $('#btn-ttr-tunnel-ok').hidden = true;
+
     if (ttrTunnelRouteId !== pending.routeId) {
       ttrTunnelRouteId = pending.routeId;
       ttrTunnelDraft = {};
     }
 
-    const revealedHtml = pending.revealed.map(c => ttrCardTile(c)).join('');
-    $('#ttr-tunnel-text').innerHTML = `Вскрыты карты: ${revealedHtml}<br>Нужно доплатить ${pending.extraNeeded} карт(ы) цвета <b>${TTR_CARD_LABELS[pending.colorUsed] || pending.colorUsed}</b> (или локомотивами), либо отказаться от маршрута.`;
+    $('#ttr-tunnel-text').innerHTML = `Нужно доплатить ${pending.extraNeeded} карт(ы) цвета <b>${TTR_CARD_LABELS[pending.colorUsed] || pending.colorUsed}</b> (или локомотивами), либо отказаться от маршрута.`;
 
     const hand = view.myHand || {};
+    // карты, уже потраченные на первоначальную оплату самого маршрута
+    // (pending.payment), больше не "доступны" для доплаты — в хэнде на
+    // сервере они пока физически лежат (спишутся только при коммите), но
+    // показывать и разрешать выбирать их второй раз для доплаты нельзя
+    const alreadySpent = pending.payment || {};
     const total = Object.values(ttrTunnelDraft).reduce((a, b) => a + b, 0);
     const locoCount = ttrTunnelDraft.locomotive || 0;
 
     const tiles = [];
     if (pending.colorUsed !== 'locomotive') {
       const colorCount = ttrTunnelDraft[pending.colorUsed] || 0;
-      const colorHave = hand[pending.colorUsed] || 0;
+      const colorHave = Math.max(0, (hand[pending.colorUsed] || 0) - (alreadySpent[pending.colorUsed] || 0));
       tiles.push(ttrPaymentTile(pending.colorUsed, colorCount, colorHave, Math.min(colorHave, pending.extraNeeded - (total - colorCount))));
     }
-    const locoHave = hand.locomotive || 0;
+    const locoHave = Math.max(0, (hand.locomotive || 0) - (alreadySpent.locomotive || 0));
     tiles.push(ttrPaymentTile('locomotive', locoCount, locoHave, Math.min(locoHave, pending.extraNeeded - (total - locoCount))));
     $('#ttr-tunnel-cards').innerHTML = tiles.join('');
 
     $('#btn-ttr-tunnel-pay').disabled = total !== pending.extraNeeded;
   }
 
-  function ttrTicketRow(t, idx) {
+  // карточка билета — реальная картинка (город-город-очки уже нарисованы
+  // на самой карточке), а не текстовая строка; short/long — разные папки
+  // и слегка разные пропорции исходников (см. .ttr-ticket-short/-long)
+  function ttrTicketImagePath(t) {
+    return `/ttr/tickets/${t.long ? 'long' : 'short'}/${t.from.toUpperCase()}-${t.to.toUpperCase()}.png`;
+  }
+
+  function ttrTicketTitle(t) {
     const from = ttrAssets.citiesById[t.from]?.name || t.from;
     const to = ttrAssets.citiesById[t.to]?.name || t.to;
+    return `${from} → ${to} (${t.points})`;
+  }
+
+  function ttrTicketRow(t, idx) {
     const isActive = ttrSuggestedPath && ttrSuggestedPath.idx === idx;
-    const cls = `ttr-ticket-row${t.fulfilled ? ' ttr-ticket-fulfilled' : ''}${isActive ? ' ttr-ticket-active' : ''}`;
-    return `<div class="${cls}" data-idx="${idx}" data-from="${t.from}" data-to="${t.to}"><span>${escapeHtml(from)} → ${escapeHtml(to)}</span><b>${t.points}</b></div>`;
+    const cls = `ttr-ticket-row ttr-ticket-card ${t.long ? 'ttr-ticket-long' : 'ttr-ticket-short'}${t.fulfilled ? ' ttr-ticket-fulfilled' : ''}${isActive ? ' ttr-ticket-active' : ''}`;
+    return `<div class="${cls}" data-idx="${idx}" data-from="${t.from}" data-to="${t.to}" style="background-image:url(${ttrTicketImagePath(t)})" title="${escapeHtml(ttrTicketTitle(t))}"></div>`;
   }
 
   function renderTtrTickets(view) {
@@ -1630,14 +1747,9 @@
       const minKeep = view.myPendingTicketsMinKeep || 1;
       $('#ttr-ticket-picker-hint').textContent = `Оставьте минимум ${minKeep} из ${pending.length}`;
       $('#ttr-ticket-picker-list').innerHTML = pending.map((t, i) => {
-        const from = ttrAssets.citiesById[t.from]?.name || t.from;
-        const to = ttrAssets.citiesById[t.to]?.name || t.to;
         const selected = ttrTicketPickerSelected.has(i);
-        return `
-          <button type="button" class="ttr-ticket-pick ${selected ? 'selected' : ''}" data-idx="${i}">
-            <span>${escapeHtml(from)} → ${escapeHtml(to)}</span><b>${t.points}</b>
-          </button>
-        `;
+        const cls = `ttr-ticket-pick ttr-ticket-card ${t.long ? 'ttr-ticket-long' : 'ttr-ticket-short'} ${selected ? 'selected' : ''}`;
+        return `<button type="button" class="${cls}" data-idx="${i}" style="background-image:url(${ttrTicketImagePath(t)})" title="${escapeHtml(ttrTicketTitle(t))}"></button>`;
       }).join('');
       confirmBtn.disabled = ttrTicketPickerSelected.size < minKeep;
       return;
@@ -1673,8 +1785,19 @@
 
   // --- обработчики (делегирование на статичные контейнеры — переживает
   // перерисовку innerHTML динамических списков внутри них) ---
+  // клик "гасится", если ему предшествовало перетаскивание карты (см.
+  // pointerup ниже) — иначе панорама мышью/пальцем случайно открывала бы
+  // оплату маршрута, оказавшегося под курсором в момент отпускания
+  let ttrSuppressNextClick = false;
+  // pointerdown ставит capture на mapContainer для надёжного драга (см.
+  // ниже), из-за чего браузер ретаргетит следующий click на сам
+  // mapContainer, а не на реальный маршрут под курсором — поэтому берём
+  // элемент из pointerdown (см. ttrPointerDownTarget), а не e.target клика
+  let ttrPointerDownTarget = null;
+
   $('#ttr-map-container').addEventListener('click', (e) => {
-    const routeEl = e.target.closest('[id^="route_"]');
+    if (ttrSuppressNextClick) { ttrSuppressNextClick = false; return; }
+    const routeEl = (ttrPointerDownTarget || e.target).closest('[id^="route_"]');
     if (!routeEl) return;
     onTtrRouteClick(routeEl.id);
   });
@@ -1719,17 +1842,118 @@
     renderTtrTickets(state.lastView);
   });
 
-  $('#ttr-zoom-in').addEventListener('click', () => {
-    ttrZoom = Math.min(TTR_ZOOM_MAX, ttrZoom + TTR_ZOOM_STEP);
-    applyTtrZoom();
+  function ttrPointerPos(e, container) {
+    const rect = container.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+  function ttrDist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function ttrMid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+  {
+    const mapContainer = $('#ttr-map-container');
+
+    // колесо мыши — зум к точке под курсором (десктоп)
+    mapContainer.addEventListener('wheel', (e) => {
+      if (!ttrMapSvg()) return;
+      e.preventDefault();
+      const { x, y } = ttrPointerPos(e, mapContainer);
+      const factor = e.deltaY < 0 ? TTR_WHEEL_ZOOM_FACTOR : 1 / TTR_WHEEL_ZOOM_FACTOR;
+      ttrZoomAt(x, y, ttrZoom * factor);
+    }, { passive: false });
+
+    // Pointer Events — общий код для мыши и тача: один активный указатель
+    // (зажатая мышь ИЛИ один палец) двигает панораму, два одновременных
+    // указателя (два пальца) — pinch-zoom с якорем в их середине.
+    const ttrActivePointers = new Map();
+    let ttrDragStart = null; // { x, y, panX, panY } — точка начала панорамы
+    let ttrPinchStartDist = null;
+    let ttrPointerMoved = 0;
+
+    // capture ставим сразу на pointerdown (иначе на очень быстром/большом
+    // драге курсор может выйти за пределы окна ещё до первого зафиксированного
+    // pointermove — без раннего capture эти события до нас просто не дойдут).
+    mapContainer.addEventListener('pointerdown', (e) => {
+      if (!ttrMapSvg()) return;
+      mapContainer.setPointerCapture(e.pointerId);
+      ttrPointerDownTarget = e.target;
+      const pos = ttrPointerPos(e, mapContainer);
+      ttrActivePointers.set(e.pointerId, pos);
+      ttrPointerMoved = 0;
+      if (ttrActivePointers.size === 1) {
+        ttrDragStart = { x: pos.x, y: pos.y, panX: ttrPanX, panY: ttrPanY };
+      } else if (ttrActivePointers.size === 2) {
+        const [a, b] = [...ttrActivePointers.values()];
+        ttrPinchStartDist = ttrDist(a, b);
+        ttrDragStart = null;
+      }
+    });
+
+    mapContainer.addEventListener('pointermove', (e) => {
+      if (!ttrActivePointers.has(e.pointerId)) return;
+      const pos = ttrPointerPos(e, mapContainer);
+      ttrActivePointers.set(e.pointerId, pos);
+
+      if (ttrActivePointers.size === 2) {
+        const [a, b] = [...ttrActivePointers.values()];
+        const dist = ttrDist(a, b);
+        const mid = ttrMid(a, b);
+        if (ttrPinchStartDist) ttrZoomAt(mid.x, mid.y, ttrZoom * (dist / ttrPinchStartDist));
+        ttrPinchStartDist = dist;
+        ttrPointerMoved += 999; // pinch — точно не одиночный клик
+        return;
+      }
+
+      if (ttrDragStart) {
+        const dx = pos.x - ttrDragStart.x;
+        const dy = pos.y - ttrDragStart.y;
+        ttrPointerMoved += Math.abs(dx) + Math.abs(dy);
+        ttrPanX = ttrDragStart.panX + dx;
+        ttrPanY = ttrDragStart.panY + dy;
+        clampTtrPan();
+        applyTtrTransform();
+      }
+    });
+
+    function ttrPointerEnd(e) {
+      if (mapContainer.hasPointerCapture(e.pointerId)) mapContainer.releasePointerCapture(e.pointerId);
+      ttrActivePointers.delete(e.pointerId);
+      if (ttrActivePointers.size < 2) ttrPinchStartDist = null;
+      if (ttrActivePointers.size === 1) {
+        const [only] = [...ttrActivePointers.values()];
+        ttrDragStart = { x: only.x, y: only.y, panX: ttrPanX, panY: ttrPanY };
+      }
+      if (ttrActivePointers.size === 0) {
+        ttrDragStart = null;
+        if (ttrPointerMoved > TTR_DRAG_CLICK_THRESHOLD) ttrSuppressNextClick = true;
+      }
+    }
+    mapContainer.addEventListener('pointerup', ttrPointerEnd);
+    mapContainer.addEventListener('pointercancel', ttrPointerEnd);
+  }
+
+  // стрелки — панорама с клавиатуры (десктоп); не перехватываем, если
+  // фокус в текстовом поле (например, наборе сообщения в чате)
+  document.addEventListener('keydown', (e) => {
+    if (!$('#screen-game-ttr')?.classList.contains('active')) return;
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+    const dirs = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    const dir = dirs[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    ttrPanX += dir[0] * TTR_KEY_PAN_STEP;
+    ttrPanY += dir[1] * TTR_KEY_PAN_STEP;
+    clampTtrPan();
+    applyTtrTransform();
   });
-  $('#ttr-zoom-out').addEventListener('click', () => {
-    ttrZoom = Math.max(TTR_ZOOM_MIN, ttrZoom - TTR_ZOOM_STEP);
-    applyTtrZoom();
+
+  // мобильный браузер может менять видимую высоту (адресная строка) или
+  // ориентацию экрана — пересчитываем размер карты и границы панорамы
+  window.addEventListener('resize', () => {
+    if ($('#screen-game-ttr')?.classList.contains('active')) ttrRefitMapSize();
   });
-  $('#ttr-zoom-reset').addEventListener('click', () => {
-    ttrZoom = 1;
-    applyTtrZoom();
+  window.addEventListener('orientationchange', () => {
+    if ($('#screen-game-ttr')?.classList.contains('active')) ttrRefitMapSize();
   });
 
   $('#ttr-draw-deck').addEventListener('click', async () => {
@@ -1781,10 +2005,19 @@
 
   $('#btn-ttr-payment-confirm').addEventListener('click', async () => {
     if (!ttrPaymentState) return;
-    const event = ttrPaymentState.kind === 'station' ? 'build-station' : 'claim-route';
-    const res = await emit(event, { routeId: ttrPaymentState.routeId, payment: ttrPaymentState.payment });
+    const { kind, routeId, payment } = ttrPaymentState;
+    const event = kind === 'station' ? 'build-station' : 'claim-route';
+    const res = await emit(event, { routeId, payment });
     if (res.error) { alert(res.error); return; }
     closeTtrPayment();
+    // не ждём следующего broadcast view — показываем вскрытые тоннельные
+    // карты сразу же по ответу сервера, иначе при autoResolved (доплата не
+    // нужна) панель не появилась бы вообще никогда (view.pendingTunnel в
+    // этом случае на сервере не выставляется, коммит происходит сразу)
+    if (event === 'claim-route' && res.tunnel) {
+      ttrTunnelLocal = { routeId, payment, ...res.tunnel };
+      renderTtrTunnelPanel(state.lastView);
+    }
   });
 
   $('#ttr-tunnel-cards').addEventListener('click', (e) => {
@@ -1799,12 +2032,23 @@
 
   $('#btn-ttr-tunnel-decline').addEventListener('click', async () => {
     const res = await emit('resolve-tunnel', { decision: null });
-    if (res.error) alert(res.error);
+    if (res.error) { alert(res.error); return; }
+    ttrTunnelLocal = null;
+    renderTtrTunnelPanel(state.lastView);
   });
 
   $('#btn-ttr-tunnel-pay').addEventListener('click', async () => {
     const res = await emit('resolve-tunnel', { decision: { extraPayment: ttrTunnelDraft } });
-    if (res.error) alert(res.error);
+    if (res.error) { alert(res.error); return; }
+    ttrTunnelLocal = null;
+    renderTtrTunnelPanel(state.lastView);
+  });
+
+  // информационный оверлей (доплата не понадобилась) — маршрут уже
+  // построен сервером сразу при claim-route, тут только закрыть попап
+  $('#btn-ttr-tunnel-ok').addEventListener('click', () => {
+    ttrTunnelLocal = null;
+    renderTtrTunnelPanel(state.lastView);
   });
 
   // ---------- маршрутизация состояния ----------
@@ -1889,14 +2133,13 @@
         ? `<div class="chat-reply-quote"><b>${escapeHtml(m.replyTo.name)}</b>: ${escapeHtml(m.replyTo.text)}</div>`
         : '';
       return `
-        <div class="chat-msg ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}" style="--chat-color:${chatColorFor(m.playerId)}">
+        <div class="chat-msg ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}" style="--chat-color:${chatColorFor(m.playerId)}" data-id="${m.id}">
           ${!grouped ? `<span class="chat-msg-name">${escapeHtml(m.name)}</span>` : ''}
           <div class="chat-bubble">
             ${replyHtml}
             <span class="chat-msg-text">${escapeHtml(m.text)}</span>
             <span class="chat-msg-time">${chatTimeLabel(m.ts)}</span>
           </div>
-          <button type="button" class="chat-reply-btn" data-id="${m.id}">↩ Ответить</button>
         </div>
       `;
     }).join('') || '<p class="hint-text">Пока никто ничего не написал</p>';
@@ -1931,10 +2174,13 @@
     $('#chat-panel').hidden = true;
   });
 
-  $('#chat-messages').addEventListener('click', (e) => {
-    const btn = e.target.closest('.chat-reply-btn');
-    if (!btn) return;
-    const msg = (state.lastView?.chat || []).find(m => m.id === btn.dataset.id);
+  // ответ вызывается правым кликом по сообщению, а не отдельной кнопкой —
+  // гасим нативное контекстное меню браузера и открываем реплай сами
+  $('#chat-messages').addEventListener('contextmenu', (e) => {
+    const row = e.target.closest('.chat-msg');
+    if (!row) return;
+    e.preventDefault();
+    const msg = (state.lastView?.chat || []).find(m => m.id === row.dataset.id);
     if (!msg) return;
     chatReplyTo = { id: msg.id, name: msg.name, text: msg.text.slice(0, 140) };
     renderChatReplyPreview();
