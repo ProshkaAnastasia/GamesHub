@@ -203,21 +203,22 @@
   <!-- ЭКРАН 3b: ИГРА (Ticket to Ride) -->
   <section id="screen-game-ttr" class="screen">
     <header class="topbar game-topbar">
-      <div id="ttr-roster-row" class="roster-row"></div>
+      <button id="btn-ttr-sound-toggle" class="btn-icon" title="Звук хода: включён">🔔</button>
       <button id="btn-force-end-game-ttr" class="btn-icon" title="Завершить игру (хост)" hidden>🏁</button>
       <button id="btn-leave-game-ttr" class="btn-icon" title="Выйти из комнаты">🚪</button>
     </header>
 
     <div class="ttr-wrap">
-      <div id="ttr-turn-indicator" class="ttr-turn-indicator"></div>
-
       <div class="ttr-map-wrap">
         <div id="ttr-map-container" class="ttr-map-container">
           <p class="hint-text">Загрузка карты…</p>
         </div>
       </div>
 
-      <div class="ttr-panel">
+      <div id="ttr-roster-row" class="roster-row"></div>
+      <div id="ttr-turn-indicator" class="ttr-turn-indicator"></div>
+
+      <div class="ttr-panel" id="ttr-panel">
         <div class="ttr-deck-row">
           <button id="ttr-draw-deck" class="ttr-card ttr-deck-pile" title="Тянуть из колоды">
             <b id="ttr-deck-count">0</b>
@@ -225,6 +226,7 @@
           <div id="ttr-faceup-row" class="ttr-faceup-row"></div>
         </div>
 
+        <span class="field-label">Мои карты</span>
         <div class="ttr-hand" id="ttr-hand"></div>
 
         <div class="ttr-tickets-head">
@@ -233,15 +235,18 @@
         </div>
         <div class="ttr-tickets" id="ttr-tickets-list"></div>
       </div>
-    </div>
 
-    <!-- выбор билетов (стартовый набор или после «Взять билеты») -->
-    <div id="ttr-ticket-picker" class="ttr-overlay" hidden>
-      <div class="ttr-overlay-panel ttr-ticket-overlay-panel">
-        <h3>Выберите билеты</h3>
-        <p id="ttr-ticket-picker-hint" class="hint-text"></p>
-        <div id="ttr-ticket-picker-list" class="ttr-ticket-picker-list"></div>
-        <button id="btn-ttr-confirm-tickets" class="btn btn-primary btn-large" disabled>Подтвердить</button>
+      <!-- выбор билетов (стартовый набор или после «Взять билеты») —
+           встаёт вместо .ttr-panel (взаимоисключающе, см. renderTtrTicketPicker
+           в app.js), а не поверх карты — карта должна оставаться видна и
+           доступна для клика/пана/зума, пока выбираются билеты -->
+      <div id="ttr-ticket-picker" class="ttr-ticket-dock" hidden>
+        <div class="ttr-overlay-panel ttr-ticket-overlay-panel">
+          <h3>Выберите билеты</h3>
+          <p id="ttr-ticket-picker-hint" class="hint-text"></p>
+          <div id="ttr-ticket-picker-list" class="ttr-ticket-picker-list"></div>
+          <button id="btn-ttr-confirm-tickets" class="btn btn-primary btn-large" disabled>Подтвердить</button>
+        </div>
       </div>
     </div>
 
@@ -298,6 +303,17 @@
       <div class="finished-report-section">
         <div class="finished-report-title">🚂 Итоговые очки</div>
         <table id="ttr-finished-scores" class="ttr-score-table"></table>
+      </div>
+      <div class="finished-report-section">
+        <div class="finished-report-title">🗺️ Карта партии</div>
+        <div class="ttr-map-wrap">
+          <div id="ttr-finished-map-container" class="ttr-map-container"></div>
+        </div>
+        <p class="hint-text">Кликните запись ниже, чтобы найти её на карте.</p>
+      </div>
+      <div class="finished-report-section">
+        <div class="finished-report-title">📋 Откуда ваши очки</div>
+        <div id="ttr-finished-breakdown" class="ttr-score-breakdown"></div>
       </div>
     </div>
   </section>
@@ -359,6 +375,13 @@
         <span class="chat-reply-preview-snippet"></span>
       </div>
       <button type="button" id="btn-chat-reply-cancel" class="btn-icon">✕</button>
+    </div>
+    <div id="chat-edit-preview" class="chat-reply-preview" hidden>
+      <div class="chat-reply-preview-text">
+        <span class="chat-reply-preview-name">Редактирование</span>
+        <span class="chat-reply-preview-snippet"></span>
+      </div>
+      <button type="button" id="btn-chat-edit-cancel" class="btn-icon">✕</button>
     </div>
     <form id="chat-form" class="chat-form">
       <textarea id="chat-input" maxlength="300" placeholder="Написать сообщение…" rows="1"></textarea>

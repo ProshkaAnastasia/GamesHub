@@ -305,6 +305,13 @@ h1 {
 /* ---------- Игра ---------- */
 
 .game-topbar { max-width: 720px; }
+/* у декодера в хедере первым элементом идёт .scoreboard с flex:1, он сам
+   отжимает кнопки-иконки вправо — у TTR ростер игроков переехал под карту
+   (см. index.html), в хедере остались только сами иконки, без него
+   justify-content: space-between растащил бы их по всей ширине хедера */
+/* justify-content: flex-end сам по себе не разводит соседние кнопки —
+   без ростера между ними в потоке больше ничего нет, вплотную друг к другу */
+#screen-game-ttr .game-topbar { justify-content: flex-end; gap: 10px; }
 .scoreboard {
   display: flex;
   align-items: center;
@@ -652,12 +659,18 @@ h1 {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  /* иконка ответа при свайпе (.chat-swipe-reply-icon) и карандаш
+     редактирования (.chat-msg-edit-btn) сидят с отрицательным отступом
+     чуть за пределами пузыря — без этого их торчащие края включались бы
+     в скролл-область по горизонтали и появлялась горизontal-прокрутка */
+  overflow-x: hidden;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 .chat-msg {
+  position: relative;
   display: flex;
   flex-direction: column;
   max-width: 82%;
@@ -666,6 +679,25 @@ h1 {
 .chat-msg.mine { align-self: flex-end; align-items: flex-end; }
 /* сообщение подряд от того же автора — имя не повторяем, отступ меньше */
 .chat-msg.grouped { margin-top: -6px; }
+/* иконка ответа при свайпе влево (см. pointer-обработчики в app.js) —
+   сидит у правого края пузыря независимо от mine/не-mine (оба варианта
+   выравнивают пузырь по правому краю .chat-msg — mine через align-items,
+   у чужих пузырь тянется на всю ширину .chat-msg по умолчанию), появляется
+   по мере драга через opacity, а не display, — сама не должна двигать
+   раскладку */
+.chat-swipe-reply-icon {
+  position: absolute;
+  /* умещается внутри паддинга .chat-messages (16px) — иначе при
+     overflow-x: hidden на контейнере (см. там же) иконку бы обрезало */
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  transition: opacity 0.1s ease;
+}
 .chat-msg-name {
   font-weight: 700;
   font-size: 12px;
@@ -678,12 +710,46 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 7px 10px;
+  /* смещение при свайпе влево (app.js двигает translateX инлайн-стилем);
+     .chat-swiping снимает transition на время самого драга, чтобы палец
+     двигал пузырь без задержки, а возврат на место после отпускания —
+     уже с анимацией */
+  transition: transform 0.15s ease;
+  touch-action: pan-y;
 }
+.chat-bubble.chat-swiping { transition: none; }
 /* .chat-msg-time — float внутри этого блока (см. ниже), без clearfix
    плавающий элемент выпадал бы из потока и пузырь не учитывал бы его
    высоту при переносе на несколько строк */
 .chat-bubble::after { content: ""; display: table; clear: both; }
 .chat-msg.mine .chat-bubble { background: var(--accent-dim); border-color: var(--accent-dim); }
+/* карандаш редактирования — только на своих сообщениях, маленький и
+   приглушённый бейдж в углу пузыря, не по hover (должен работать и на
+   тач-устройствах, где никакого hover нет) */
+.chat-msg-edit-btn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.chat-msg-edit-btn:hover { opacity: 1; color: var(--text); }
+.chat-msg-edited {
+  font-style: italic;
+  margin-left: 4px;
+}
 .chat-msg-text {
   font-size: 13px;
   line-height: 1.4;
@@ -697,7 +763,12 @@ h1 {
   float: right;
   font-size: 10px;
   color: var(--text-muted);
-  margin: 3px 0 0 8px;
+  /* float всегда прижимается верхним краем к верху строки текста, а не
+     центрируется по ней — из-за разницы высоты строк (18.2px у 13px/1.4
+     текста против ~14px у 10px времени) это давало на глаз "время выше
+     текста". margin-top подобран так, чтобы центры совпадали ровно
+     (см. замеры getBoundingClientRect при подборе) */
+  margin: 5px 0 0 8px;
 }
 .chat-reply-quote {
   border-left: 2px solid var(--accent);
@@ -709,8 +780,42 @@ h1 {
   background: rgba(255, 255, 255, 0.04);
 }
 .chat-reply-quote b { color: var(--text); }
-/* ответ вызывается правым кликом по сообщению (contextmenu, см. app.js),
-   отдельной кнопки в разметке больше нет — курсор просто обычный */
+/* ответ вызывается правым кликом по сообщению (contextmenu, см. app.js)
+   на десктопе или свайпом влево на тач-устройствах — отдельной кнопки в
+   разметке нет, курсор на самом сообщении обычный */
+
+/* статус прочтения — только на своих сообщениях, под пузырём, справа
+   (тот же край, что и сам пузырь у mine-сообщений) */
+.chat-msg-receipt {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 2px 4px 0;
+  cursor: pointer;
+  letter-spacing: -1px;
+}
+.chat-msg-receipt.read { color: var(--accent); letter-spacing: 0; }
+
+.chat-read-popover {
+  position: fixed;
+  z-index: 700;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 8px 0;
+  min-width: 180px;
+  max-width: 260px;
+}
+.chat-read-popover-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.chat-read-popover-row.read { color: var(--text); }
+.chat-read-popover-row.read span:last-child { color: var(--accent); }
 
 .chat-reply-preview[hidden] { display: none; }
 .chat-reply-preview {
@@ -871,10 +976,32 @@ h1 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+  margin-bottom: 16px;
 }
+.finished-report-section:last-child { margin-bottom: 0; }
 .finished-report-title {
   font-weight: 700;
   margin-bottom: 12px;
+}
+
+/* у TTR, в отличие от декодера, есть карта партии — узкой 460px-колонки
+   декодера ей не хватит, расширяем именно этот отчёт (по id, decoder-овский
+   .finished-report трогать не нужно). --ttr-cards-w тут своя (а не
+   унаследованная от .ttr-wrap — тот существует только на игровом экране,
+   не на экране результатов) — тот же масштаб карты, что и в игре */
+#ttr-finished-report { max-width: min(100%, 1000px); --ttr-cards-w: 1000px; }
+/* карта статичная (без пан/зума, в отличие от игрового экрана) — просто
+   заполняет контейнер целиком; ttrRefitMapSize() для нём не вызывается */
+#ttr-finished-map-container svg { width: 100%; height: 100%; display: block; }
+/* подсветка найденного по клику в списке очков маршрута/билета — свой
+   цвет (не зелёный/розовый игровой карты, там другой смысл: тут просто
+   "вот то, на что ты кликнул", а не "мой/ещё нужно построить") */
+#ttr-finished-map-container [id^="route_"].ttr-finished-highlight,
+#ttr-finished-map-container [id^="route_"].ttr-finished-highlight rect,
+#ttr-finished-map-container [id^="route_"].ttr-finished-highlight path {
+  stroke: var(--team-a);
+  stroke-width: 70px;
+  paint-order: stroke;
 }
 
 .tiebreak-head { text-align: center; margin-bottom: 18px; }
@@ -1027,24 +1154,41 @@ h1 {
    CSS-фильтры на SVG-группах не применяются вовсе (наведение было не видно
    совсем), а на светлых базовых цветах (gray/white/yellow) brightness()
    выбивал каналы в 255 и красил путь в белый — на белом фоне карты это
-   означало полную невидимость. stroke не трогает fill вообще. */
-.ttr-map-container [id^="route_"].ttr-claimable:hover,
-.ttr-map-container [id^="route_"].ttr-claimable:hover rect,
-.ttr-map-container [id^="route_"].ttr-claimable:hover path {
-  stroke: var(--team-a);
-  stroke-width: 30px;
-  paint-order: stroke;
+   означало полную невидимость. stroke не трогает fill вообще.
+   (hover:hover) — на тачскрине курсора нет, тап давал "залипающий" hover
+   без возможности его снять (маршрут/карта оставались подсвечены/увеличены
+   до следующего тапа куда-то ещё), см. те же скоупы ниже у .ttr-faceup-btn
+   и .ttr-ticket-card */
+@media (hover: hover) and (pointer: fine) {
+  .ttr-map-container [id^="route_"].ttr-claimable:hover,
+  .ttr-map-container [id^="route_"].ttr-claimable:hover rect,
+  .ttr-map-container [id^="route_"].ttr-claimable:hover path {
+    stroke: var(--team-a);
+    stroke-width: 30px;
+    paint-order: stroke;
+  }
 }
 /* подсказка пути по клику на билет — не завязана на :hover/ttr-claimable
    (должна работать и в чужой ход), и заметно ярче/толще обычного hover'а,
-   чтобы явно читаться как отдельная, более настойчивая подсказка */
-.ttr-map-container [id^="route_"].ttr-suggested,
-.ttr-map-container [id^="route_"].ttr-suggested rect,
-.ttr-map-container [id^="route_"].ttr-suggested path {
+   чтобы явно читаться как отдельная, более настойчивая подсказка.
+   Два цвета: ещё не построенный кусок пути — маджента (needed), уже мой,
+   построенный или подключённый станцией — зелёный (mine), тот же акцент,
+   что и у .ttr-city-highlight/.ttr-ticket-fulfilled — чтобы "уже готово"
+   читалось одинаково по всей игре */
+.ttr-map-container [id^="route_"].ttr-suggested-needed,
+.ttr-map-container [id^="route_"].ttr-suggested-needed rect,
+.ttr-map-container [id^="route_"].ttr-suggested-needed path {
   /* золотой сливался с игровым жёлтым цветом маршрутов (#FFCC00) — маджента
      не встречается вообще ни у одного игрового/командного цвета на карте */
   stroke: #ff17c1;
-  stroke-width: 55px;
+  stroke-width: 70px;
+  paint-order: stroke;
+}
+.ttr-map-container [id^="route_"].ttr-suggested-mine,
+.ttr-map-container [id^="route_"].ttr-suggested-mine rect,
+.ttr-map-container [id^="route_"].ttr-suggested-mine path {
+  stroke: var(--accent);
+  stroke-width: 70px;
   paint-order: stroke;
 }
 .ttr-map-container .ttr-selected,
@@ -1111,6 +1255,7 @@ h1 {
   position: relative;
   cursor: pointer;
   background-image: url(/ttr/cards/card-back.png);
+  transition: transform 0.15s ease;
 }
 .ttr-deck-pile:disabled { opacity: 0.5; cursor: not-allowed; }
 /* display:contents — сама обёртка не создаёт бокс и не участвует в сетке,
@@ -1156,8 +1301,14 @@ h1 {
 .ttr-faceup-btn { cursor: pointer; transition: transform 0.15s ease; }
 .ttr-faceup-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 /* совсем небольшое увеличение при наведении — только пока карту реально
-   можно взять (не в чужой ход и т.д., см. :disabled) */
-.ttr-faceup-btn:not(:disabled):hover { transform: scale(1.08); z-index: 5; }
+   можно взять (не в чужой ход и т.д., см. :disabled). Только на устройствах
+   с настоящим курсором (hover:hover) — на тачскрине тап "залипал" бы в
+   увеличенном состоянии до следующего тапа мимо, курсора же там нет вовсе,
+   так что и смысла в эффекте нет */
+@media (hover: hover) and (pointer: fine) {
+  .ttr-faceup-btn:not(:disabled):hover { transform: scale(1.08); z-index: 5; }
+  .ttr-deck-pile:not(:disabled):hover { transform: scale(1.08); z-index: 5; }
+}
 
 /* та же сетка (150px-колонки, gap 10px), что у .ttr-deck-row — карты руки
    встают строго под колодой/открытыми картами, без сдвига */
@@ -1199,28 +1350,35 @@ h1 {
 }
 /* увеличение только у уже полученных билетов (.ttr-ticket-row, список
    "Мои билеты"), не у карточек в оверлее выбора (.ttr-ticket-pick) — там
-   при выборе билетов резкий зум курсором только мешал бы сравнивать карты */
-.ttr-ticket-row.ttr-ticket-card:hover {
-  transform: scale(1.4);
-  z-index: 5;
+   при выборе билетов резкий зум курсором только мешал бы сравнивать карты.
+   Только при реальном курсоре (hover:hover) — на тачскрине тап "залипал" бы
+   в увеличенном состоянии до следующего тапа мимо */
+@media (hover: hover) and (pointer: fine) {
+  .ttr-ticket-row.ttr-ticket-card:hover {
+    transform: scale(1.4);
+    z-index: 5;
+  }
 }
 .ttr-ticket-card.ttr-ticket-short { aspect-ratio: 1376 / 768; }
 .ttr-ticket-card.ttr-ticket-long { aspect-ratio: 1677 / 938; }
-/* билет выполнен — города уже связаны собственной сетью маршрутов;
-   подсвечиваем сам билет в списке, а не маршрут на карте (маршрут всегда
-   остаётся в цвете владельца) */
-.ttr-ticket-fulfilled {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(124, 227, 139, 0.4);
-}
 /* сейчас показывается подсказка пути именно для этого билета — тот же
-   цвет, что и подсветка на карте (.ttr-suggested), чтобы было видно,
-   какой билет к какому пути относится. Комбинируется с .ttr-ticket-fulfilled
-   (билет может быть и выполнен, и выбран одновременно) — обводка ставится
-   в последнюю очередь ниже по каскаду и перебивает цвет рамки */
+   цвет, что и подсветка ещё не построенной части пути на карте
+   (.ttr-suggested-needed), чтобы было видно, какой билет к какому пути
+   относится. Идёт ДО .ttr-ticket-fulfilled ниже по каскаду специально —
+   билет может быть выполнен и выбран одновременно, и как только он
+   выполнен, рамка должна стать зелёной автоматически, а не оставаться
+   розовой из-за того, что он ещё и "выбран" */
 .ttr-ticket-active {
   border-color: #ff17c1;
   box-shadow: 0 0 0 2px rgba(255, 23, 193, 0.4);
+}
+/* билет выполнен — города уже связаны собственной сетью маршрутов;
+   подсвечиваем сам билет в списке, а не маршрут на карте (маршрут всегда
+   остаётся в цвете владельца). Стоит ПОСЛЕ .ttr-ticket-active в каскаде —
+   при одинаковой специфичности "выполнен" должен перебивать "выбран" */
+.ttr-ticket-fulfilled {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 227, 139, 0.4);
 }
 
 .ttr-overlay {
@@ -1258,11 +1416,63 @@ h1 {
    (480px) на это уже не хватит с паддингами — своя, более широкая панель */
 .ttr-ticket-overlay-panel { max-width: 540px; }
 
-/* та же сетка, что и у .ttr-tickets — тут это отдельный оверлей, поэтому
-   центрируем (justify-content), а не выравниваем по левому краю, как в
-   общей табличной сетке карт */
+/* пикер билетов встаёт обычным блоком под картой ВМЕСТО .ttr-panel
+   (см. renderTtrTicketPicker в app.js), а не поверх неё как .ttr-overlay —
+   карта должна оставаться видна и кликабельна, пока выбираются билеты.
+   Та же ширина, что у карты/.ttr-panel (--ttr-cards-w, см. .ttr-wrap) */
+.ttr-ticket-dock { width: min(100%, var(--ttr-cards-w)); margin: 0 auto 16px; }
+/* .ttr-overlay-panel по умолчанию — модалка (max-width 480/540px,
+   max-height 85vh + свой скролл) — тут это просто карточка в потоке
+   страницы, ограничения модалки снимаем, скролл — обычный, страничный */
+.ttr-ticket-dock .ttr-overlay-panel { max-width: 100%; max-height: none; }
+
+/* та же сетка, что и у .ttr-tickets — центрируем (justify-content), а не
+   выравниваем по левому краю, как в общей табличной сетке карт */
 .ttr-ticket-picker-list { display: grid; grid-template-columns: repeat(auto-fill, 150px); justify-content: center; gap: 10px; margin: 12px 0; }
+
+/* клик по картинке карточки (просмотр маршрута на карте) саму карточку
+   никак не подсвечивает — единственный сигнал на карточке это "оставляю"
+   (галочка + вся карточка загорается зелёным), взятый из чекбокса, а не
+   из того, что сейчас показано на карте */
 .ttr-ticket-pick.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 227, 139, 0.4); }
+
+/* картинка билета — только просмотр на карте, весь клик по ней не трогает
+   выбор. Заполняет родителя целиком, рамка/фон/радиус — уже на
+   .ttr-ticket-card (родителе), тут просто вписываемся внутрь */
+.ttr-ticket-pick-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--panel-raised);
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  cursor: pointer;
+}
+/* галочка "оставить/не оставить" — отдельный маленький бейдж в углу,
+   не зависящий от клика по самой картинке */
+.ttr-ticket-pick-toggle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background: rgba(10, 13, 16, 0.75);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+.ttr-ticket-pick-toggle.selected { border-color: var(--accent); background: var(--accent); color: #0a0d10; }
 
 .ttr-payment-cards { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
 .ttr-payment-tile { display: flex; align-items: center; gap: 10px; }
@@ -1285,9 +1495,51 @@ h1 {
 .ttr-score-table .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
 .ttr-winner-row { color: var(--accent); font-weight: 700; }
 
+.ttr-score-breakdown { display: flex; flex-direction: column; gap: 14px; }
+.ttr-score-breakdown-player {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.ttr-score-breakdown-head { display: flex; align-items: center; font-weight: 700; margin-bottom: 8px; }
+.ttr-score-breakdown-head .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
+.ttr-score-breakdown-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ttr-score-breakdown-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ttr-score-breakdown-list li:last-child { border-bottom: none; }
+/* строки за маршрут/билет кликабельны — находят себя на карте партии
+   выше; бонус за длинный путь и штраф за станции кликать некуда
+   (для них нет одного конкретного места на карте) */
+.ttr-score-log-clickable {
+  cursor: pointer;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+.ttr-score-log-clickable:hover { background: var(--panel-raised); }
+.ttr-score-log-active { background: var(--panel-raised); color: var(--text); }
+.ttr-score-pos { color: var(--accent); }
+.ttr-score-neg { color: var(--danger); }
+
 @media (max-width: 560px) {
   .teams-grid, .clues-board, .guess-boards { grid-template-columns: 1fr; }
   .word-slots { grid-template-columns: repeat(2, 1fr); }
   h1 { font-size: 24px; }
   .assoc-word-grid { grid-template-columns: 1fr; }
+  /* .ttr-ticket-card занимает "3 колонки по 150px" сетки — на узком экране
+     таких трёх колонок физически нет (умещается 1-2), и span:3 ломался
+     (третья карта в ряду вылезала за экран, вплоть до отрицательного x).
+     На мобильном сетка — просто один растягивающийся столбец на всю
+     ширину, билет занимает его целиком */
+  .ttr-tickets, .ttr-ticket-picker-list { grid-template-columns: 1fr; }
+  .ttr-ticket-card { grid-column: span 1; }
 }

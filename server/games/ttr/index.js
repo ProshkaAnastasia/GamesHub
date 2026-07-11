@@ -43,6 +43,11 @@ class TicketToRideGame {
     this.hands = {}; // playerId -> {color: count}
     this.trainsLeft = {}; // playerId -> number
     this.score = {}; // playerId -> number
+    // playerId -> [{type, points, ts, ...}] — журнал начисления/списания
+    // очков для итогового разбора "когда и за что" на экране конца игры.
+    // type: 'route' (routeId), 'ticket' (from,to,fulfilled), 'longest-path',
+    // 'station-penalty' (count)
+    this.scoreLog = {};
     this.ownedRoutes = {}; // playerId -> Set<routeId>
     this.routeOwner = {}; // routeId -> playerId (обратный индекс для быстрой проверки занятости)
     this.pendingInitialTickets = {}; // playerId -> [ticket,...] пока не подтвердил выбор
@@ -70,6 +75,7 @@ class TicketToRideGame {
       this.hands[id] = emptyHand();
       this.trainsLeft[id] = rules.TRAINS_PER_PLAYER;
       this.score[id] = 0;
+      this.scoreLog[id] = [];
       this.ownedRoutes[id] = new Set();
       this.stationsLeft[id] = STATIONS_PER_PLAYER;
       this.stationLinks[id] = new Set();
@@ -129,6 +135,7 @@ class TicketToRideGame {
       hands: this.hands,
       trainsLeft: this.trainsLeft,
       score: this.score,
+      scoreLog: this.scoreLog,
       ownedRoutes: Object.fromEntries(
         Object.entries(this.ownedRoutes).map(([pid, set]) => [pid, [...set]])
       ),
@@ -215,10 +222,17 @@ class TicketToRideGame {
       const connected = new Set([...(this.ownedRoutes[pid] || []), ...(this.stationLinks[pid] || [])]);
       (this.keptTickets[pid] || []).forEach((t) => {
         const ok = rules.ticketFulfilled(t, connected);
-        this.score[pid] += ok ? t.points : -t.points;
+        const pts = ok ? t.points : -t.points;
+        this.score[pid] += pts;
+        this.scoreLog[pid].push({ type: 'ticket', from: t.from, to: t.to, fulfilled: ok, points: pts, ts: Date.now() });
       });
       // штраф за неиспользованные станции
-      this.score[pid] -= STATION_UNUSED_PENALTY * (this.stationsLeft[pid] || 0);
+      const unusedStations = this.stationsLeft[pid] || 0;
+      if (unusedStations > 0) {
+        const penalty = STATION_UNUSED_PENALTY * unusedStations;
+        this.score[pid] -= penalty;
+        this.scoreLog[pid].push({ type: 'station-penalty', count: unusedStations, points: -penalty, ts: Date.now() });
+      }
     });
 
     // бонус за самый длинный путь — только реально построенные маршруты
@@ -228,7 +242,10 @@ class TicketToRideGame {
       const len = rules.longestPath(this.ownedRoutes[pid]);
       if (len > bestLen) { bestLen = len; bestPid = pid; }
     });
-    if (bestPid) this.score[bestPid] += 10;
+    if (bestPid) {
+      this.score[bestPid] += 10;
+      this.scoreLog[bestPid].push({ type: 'longest-path', length: bestLen, points: 10, ts: Date.now() });
+    }
 
     let winnerId = null;
     this.playerIds.forEach((pid) => {
@@ -394,7 +411,9 @@ class TicketToRideGame {
     this.routeOwner[route.id] = playerId;
     this.ownedRoutes[playerId].add(route.id);
     this.trainsLeft[playerId] -= route.length;
-    this.score[playerId] += rules.SCORE_TABLE[route.length] || 0;
+    const routePoints = rules.SCORE_TABLE[route.length] || 0;
+    this.score[playerId] += routePoints;
+    this.scoreLog[playerId].push({ type: 'route', routeId: route.id, points: routePoints, ts: Date.now() });
 
     this.advanceTurn();
   }
@@ -453,6 +472,7 @@ class TicketToRideGame {
   getArchiveSummary() {
     return {
       score: this.score,
+      scoreLog: this.scoreLog,
       ownedRoutes: Object.fromEntries(
         Object.entries(this.ownedRoutes).map(([pid, set]) => [pid, [...set]])
       ),
@@ -473,6 +493,11 @@ class TicketToRideGame {
         color: this.playerColor[id],
         trainsLeft: this.trainsLeft[id],
         score: this.score[id],
+        // разбор "когда и за что" — публичная информация (маршруты и так
+        // видны на карте всем, билеты/бонусы раскрываются только в конце
+        // игры и не влияют на текущий ход), нужен клиенту для экрана
+        // итогов; во время самой игры просто не используется
+        scoreLog: this.scoreLog[id],
         handSize: Object.values(this.hands[id]).reduce((a, b) => a + b, 0),
         ticketCount: (this.keptTickets[id] || []).length,
         stationsLeft: this.stationsLeft[id],

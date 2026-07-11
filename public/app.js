@@ -7,6 +7,7 @@
     historyOpen: false,
     chatOpen: false,
     gamesOpen: false,
+    ttrLastCurrentPlayerId: null,
   };
 
   // ---------- утилиты ----------
@@ -27,6 +28,38 @@
   function showError(el, message) {
     el.textContent = message;
     el.hidden = !message;
+  }
+
+  // ---------- звук уведомления о своём ходе (TTR) ----------
+  function getTtrSoundEnabled() {
+    try { return localStorage.getItem('ttr_sound_enabled') !== '0'; } catch (e) { return true; }
+  }
+  function setTtrSoundEnabled(enabled) {
+    try { localStorage.setItem('ttr_sound_enabled', enabled ? '1' : '0'); } catch (e) {}
+  }
+  let ttrAudioCtx = null;
+  function playTtrTurnSound() {
+    if (!getTtrSoundEnabled()) return;
+    try {
+      ttrAudioCtx = ttrAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = ttrAudioCtx;
+      if (ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+      // короткое восходящее «динь-дон» из двух тонов, без файлов-ассетов
+      [880, 1175].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const start = now + i * 0.12;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.2, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.2);
+      });
+    } catch (e) { /* Web Audio недоступен — не критично */ }
   }
 
   // ---------- персистентная личность и кэш комнаты ----------
@@ -259,6 +292,18 @@
   $('#btn-leave-lobby').addEventListener('click', leaveRoom);
   $('#btn-leave-game').addEventListener('click', leaveRoom);
   $('#btn-leave-game-ttr').addEventListener('click', leaveRoom);
+
+  const btnTtrSoundToggle = $('#btn-ttr-sound-toggle');
+  function renderTtrSoundToggle() {
+    const enabled = getTtrSoundEnabled();
+    btnTtrSoundToggle.textContent = enabled ? '🔔' : '🔕';
+    btnTtrSoundToggle.title = enabled ? 'Звук хода: включён' : 'Звук хода: выключен';
+  }
+  btnTtrSoundToggle.addEventListener('click', () => {
+    setTtrSoundEnabled(!getTtrSoundEnabled());
+    renderTtrSoundToggle();
+  });
+  renderTtrSoundToggle();
 
   async function forceEndGame() {
     if (!confirm('Завершить текущую игру для всех? Победитель не будет определён.')) return;
@@ -1065,7 +1110,12 @@
       $('#finished-report').hidden = true;
       $('#btn-toggle-history-finished').hidden = true;
       $('#ttr-finished-report').hidden = false;
-      renderTtrFinishedScores(view);
+      loadTtrAssets().then(() => {
+        if (state.lastView !== view) return; // комната уже ушла дальше, пока грузилась карта
+        if (!ttrFinishedMapMounted) { mountTtrFinishedMap(); ttrFinishedMapMounted = true; }
+        paintTtrFinishedRoutes(view);
+        renderTtrFinishedScores(view);
+      });
       return;
     }
     $('#ttr-finished-report').hidden = true;
@@ -1098,8 +1148,12 @@
     orange: '#FF8D28', black: '#8E8E93', red: '#FF383C', green: '#34C759',
     locomotive: '#B980F0',
   };
+  // ключ 'white' остаётся 'white' (нужен для сопоставления с правилами
+  // маршрутов/составом колоды — см. CLAUDE.md про #AC7F5E), но подпись для
+  // игрока — "Коричневый": реальный цвет карты визуально коричневый/кремовый,
+  // называть его "Белый" в UI только путало при выборе карт на оплату
   const TTR_CARD_LABELS = {
-    pink: 'Розовый', white: 'Белый', blue: 'Синий', yellow: 'Жёлтый',
+    pink: 'Розовый', white: 'Коричневый', blue: 'Синий', yellow: 'Жёлтый',
     orange: 'Оранжевый', black: 'Чёрный', red: 'Красный', green: 'Зелёный',
     locomotive: 'Локомотив',
   };
@@ -1172,33 +1226,54 @@
   let ttrTicketPickerSelected = new Set();
   let ttrSuggestedPath = null; // { idx, from, to, routeIds: Set<routeId> } — подсказка пути по клику на билет
 
-  // кратчайший (по сумме length) путь между городами билета через маршруты,
-  // не занятые соперником — свои уже построенные маршруты считаются
-  // "бесплатными" (вес 0), т.к. их не нужно строить заново. Возвращает
-  // список routeId или null, если соперники перекрыли все варианты.
-  function ttrFindBestPath(view, fromCity, toCity) {
+  // сколько карт стоит СЛЕДУЮЩАЯ станция игрока — 1-я станция 1 карту,
+  // 2-я — 2, 3-я — 3 (см. STATIONS_PER_PLAYER/buildStation в
+  // server/games/ttr/index.js — держать в синхроне, если поменяется там)
+  const TTR_STATIONS_PER_PLAYER = 3;
+  function ttrNextStationCost(stationsLeft) {
+    return TTR_STATIONS_PER_PLAYER + 1 - stationsLeft;
+  }
+
+  // граф "цены в картах" между городами — свои уже построенные/подключённые
+  // станцией маршруты бесплатны (вес 0), чужой ЕЩЁ не подключённый маршрут —
+  // не тупик, а проходим через постройку туда своей станции (вес — цена
+  // следующей станции, те же "единицы карт", что и у обычных маршрутов),
+  // если станций совсем не осталось — недоступен. Общий для расчёта путей
+  // всех билетов разом (см. ttrFindBestPath ниже), веса от текущего view
+  // не зависят от конкретной пары городов, поэтому строится один раз.
+  function ttrBuildWeightedGraph(view) {
     const routeOwner = view.routeOwner || {};
     const myId = view.me?.id;
-    // маршруты, разблокированные МОИМИ станциями — считаются бесплатными
-    // (уже подключены), как и собственные построенные
     const myLinkedRoutes = new Set((view.stationMarkers || []).filter(m => m.playerId === myId).map(m => m.routeId));
+    const myStationsLeft = (view.ttrPlayers || []).find(p => p.id === myId)?.stationsLeft || 0;
+    const stationCost = ttrNextStationCost(myStationsLeft);
     const adj = new Map(); // city -> [{to, routeId, weight}]
     Object.values(ttrAssets.routesById).forEach((r) => {
       const owner = routeOwner[r.id];
       const isMineOrLinked = owner === myId || myLinkedRoutes.has(r.id);
-      if (owner && !isMineOrLinked) return; // занято соперником и станции тут нет — недоступно
-      const weight = isMineOrLinked ? 0 : r.length;
+      let weight;
+      if (isMineOrLinked) {
+        weight = 0;
+      } else if (owner) {
+        if (myStationsLeft <= 0) return;
+        weight = stationCost;
+      } else {
+        weight = r.length;
+      }
       if (!adj.has(r.from)) adj.set(r.from, []);
       if (!adj.has(r.to)) adj.set(r.to, []);
       adj.get(r.from).push({ to: r.to, routeId: r.id, weight });
       adj.get(r.to).push({ to: r.from, routeId: r.id, weight });
     });
+    return adj;
+  }
 
-    if (fromCity === toCity) return [];
-    const dist = new Map([[fromCity, 0]]);
+  // Дейкстра от одного города до всех остальных по уже построенному графу —
+  // городов мало (47), обычный перебор без кучи вполне достаточен
+  function ttrDijkstraFrom(adj, startCity) {
+    const dist = new Map([[startCity, 0]]);
     const cameFrom = new Map(); // city -> { prevCity, routeId }
     const visited = new Set();
-    // городов мало (47) — обычный перебор без кучи вполне достаточен
     while (true) {
       let cur = null;
       let curDist = Infinity;
@@ -1206,16 +1281,6 @@
         if (!visited.has(city) && d < curDist) { cur = city; curDist = d; }
       }
       if (cur === null) break;
-      if (cur === toCity) {
-        const path = [];
-        let node = toCity;
-        while (node !== fromCity) {
-          const step = cameFrom.get(node);
-          path.push(step.routeId);
-          node = step.prevCity;
-        }
-        return path;
-      }
       visited.add(cur);
       for (const { to, routeId, weight } of adj.get(cur) || []) {
         if (visited.has(to)) continue;
@@ -1226,14 +1291,100 @@
         }
       }
     }
-    return null; // соперники перекрыли все варианты — билет больше не выполнить
+    return { dist, cameFrom };
+  }
+
+  // восстанавливает путь (список routeId) из cameFrom, посчитанного
+  // ttrDijkstraFrom(adj, fromCity) — null, если toCity недостижим
+  function ttrExtractPath(cameFrom, fromCity, toCity) {
+    if (fromCity === toCity) return [];
+    if (!cameFrom.has(toCity)) return null;
+    const path = [];
+    let node = toCity;
+    while (node !== fromCity) {
+      const step = cameFrom.get(node);
+      if (!step) return null;
+      path.push(step.routeId);
+      node = step.prevCity;
+    }
+    return path;
+  }
+
+  // путь для конкретного билета (fromCity/toCity), но выбранный с оглядкой
+  // на ВСЮ сеть игрока — города этого билета плюс города всех уже
+  // ОСТАВЛЕННЫХ билетов ("Мои билеты"; ещё не подтверждённые кандидаты в
+  // пикере не считаются — от них можно отказаться) — целиком, а не только
+  // двух городов текущего билета по отдельности. Так общие участки пути,
+  // нужные сразу нескольким билетам, не считаются/не строятся дважды: это
+  // 2-аппроксимация дерева Штейнера (кратчайшие пути между всеми парами
+  // терминалов -> MST по этим расстояниям -> объединение путей вдоль рёбер
+  // MST), стандартный приём для таких задач, а не полный (NP-полный) перебор.
+  // Подсвечивается на карте по-прежнему только путь ЭТОГО билета — общая
+  // сеть тут только влияет на то, ЧЕРЕЗ какие маршруты он выгоднее пройдёт.
+  // Возвращает список routeId или null, если соперники перекрыли все
+  // варианты (в т.ч. станций больше нет).
+  function ttrFindBestPath(view, fromCity, toCity) {
+    const adj = ttrBuildWeightedGraph(view);
+
+    const terminals = new Set([fromCity, toCity]);
+    (view.myTickets || []).forEach((t) => { terminals.add(t.from); terminals.add(t.to); });
+
+    // билет — единственный в сети (нет других оставленных, или оба города
+    // совпали с ним же) — дерево Штейнера с двумя терминалами это и есть
+    // обычный кратчайший путь, без лишней работы
+    if (terminals.size <= 2) {
+      return ttrExtractPath(ttrDijkstraFrom(adj, fromCity).cameFrom, fromCity, toCity);
+    }
+
+    const terminalList = [...terminals];
+    const dijkstraByTerminal = new Map(terminalList.map((t) => [t, ttrDijkstraFrom(adj, t)]));
+
+    // Prim: растим дерево на терминалах, каждый раз добавляя ближайший
+    // ещё не подключённый терминал по уже посчитанным расстояниям
+    const inTree = new Set([terminalList[0]]);
+    const treeRouteIds = new Set();
+    while (inTree.size < terminalList.length) {
+      let best = null; // { from, to, dist }
+      for (const a of inTree) {
+        const { dist } = dijkstraByTerminal.get(a);
+        for (const b of terminalList) {
+          if (inTree.has(b)) continue;
+          const d = dist.has(b) ? dist.get(b) : Infinity;
+          if (d < Infinity && (!best || d < best.dist)) best = { from: a, to: b, dist: d };
+        }
+      }
+      if (!best) break; // остальные терминалы недостижимы (перекрыты соперниками) — не страшно, ниже есть подстраховка
+      inTree.add(best.to);
+      const path = ttrExtractPath(dijkstraByTerminal.get(best.from).cameFrom, best.from, best.to);
+      if (path) path.forEach((id) => treeRouteIds.add(id));
+    }
+
+    // путь между fromCity/toCity ВНУТРИ уже собранной общей сети — те же
+    // веса, что и в основном графе (берём их оттуда, а не пересчитываем)
+    const treeAdj = new Map();
+    treeRouteIds.forEach((routeId) => {
+      const r = ttrAssets.routesById[routeId];
+      const fromEdges = adj.get(r.from) || [];
+      const weight = (fromEdges.find((e) => e.routeId === routeId) || {}).weight ?? r.length;
+      if (!treeAdj.has(r.from)) treeAdj.set(r.from, []);
+      if (!treeAdj.has(r.to)) treeAdj.set(r.to, []);
+      treeAdj.get(r.from).push({ to: r.to, routeId, weight });
+      treeAdj.get(r.to).push({ to: r.from, routeId, weight });
+    });
+    const treePath = ttrExtractPath(ttrDijkstraFrom(treeAdj, fromCity).cameFrom, fromCity, toCity);
+    if (treePath) return treePath;
+
+    // подстраховка: если общая сеть почему-то не связала именно эту пару
+    // (например, редкий случай недостижимости где-то ещё в дереве) —
+    // обычный прямой путь без оглядки на остальные билеты
+    return ttrExtractPath(ttrDijkstraFrom(adj, fromCity).cameFrom, fromCity, toCity);
   }
 
   function loadTtrAssets() {
     if (!ttrAssetsPromise) {
       ttrAssetsPromise = Promise.all([
         fetch('/api/ttr/map').then(r => r.json()),
-        fetch('/ttr/ttr-map-new.svg').then(r => r.text()),
+        fetch('/ttr/ttr-map-new-new.svg').then(r => r.text()),
       ]).then(([mapData, svgText]) => {
         const citiesById = {};
         mapData.cities.forEach(c => { citiesById[c.id] = c; });
@@ -1328,6 +1479,36 @@
     applyTtrTransform();
   }
 
+  // подгоняет пан/зум так, чтобы все переданные города гарантированно
+  // попали в кадр — используется при просмотре билета в пикере, чтобы
+  // подсвеченный маршрут не оказался за пределами текущего вида карты
+  // (если она до этого была приближена/сдвинута куда-то ещё). padding —
+  // в единицах viewBox (14472×11804), даёт немного места вокруг городов,
+  // а не впритык по их точкам.
+  function ttrFitToCities(cityIds, { padding = 900 } = {}) {
+    if (!ttrContW || !ttrContH) return;
+    const pts = cityIds.map(id => ttrAssets.citiesById[id]).filter(Boolean);
+    if (!pts.length) return;
+    const VIEWBOX_W = 14472;
+    // контейнер держит aspect-ratio: 14472/11804 (см. .ttr-map-container в
+    // CSS), так что масштаб viewBox->CSS-пиксели один и тот же по обеим осям
+    const s = ttrContW / VIEWBOX_W;
+    const minX = Math.min(...pts.map(p => p.x)) - padding;
+    const maxX = Math.max(...pts.map(p => p.x)) + padding;
+    const minY = Math.min(...pts.map(p => p.y)) - padding;
+    const maxY = Math.max(...pts.map(p => p.y)) + padding;
+    const boxW = (maxX - minX) * s;
+    const boxH = (maxY - minY) * s;
+    const fitZoom = Math.min(ttrContW / boxW, ttrContH / boxH);
+    ttrZoom = Math.max(TTR_ZOOM_MIN, Math.min(TTR_ZOOM_MAX, fitZoom));
+    const centerX = ((minX + maxX) / 2) * s;
+    const centerY = ((minY + maxY) / 2) * s;
+    ttrPanX = ttrContW / 2 - centerX * ttrZoom;
+    ttrPanY = ttrContH / 2 - centerY * ttrZoom;
+    clampTtrPan();
+    applyTtrTransform();
+  }
+
   function mountTtrMap() {
     const container = $('#ttr-map-container');
     container.innerHTML = ttrAssets.svgText;
@@ -1379,6 +1560,7 @@
       return `
         <span class="roster-chip ttr-roster-chip ${offline ? 'offline' : ''} ${isTurn ? 'ttr-turn' : ''}">
           <span class="dot" style="background:${hex}"></span>${escapeHtml(p.name)}${offline ? ' (офлайн)' : ''}
+          ${p.id === view.me?.id ? '<span class="player-tag-you">вы</span>' : ''}
           <span class="ttr-roster-stats">🚃<b style="color:${hex}">${p.trainsLeft}</b> · 🚉${p.stationsLeft} · 🏆${p.score}</span>
         </span>
       `;
@@ -1418,8 +1600,14 @@
       const el = container.querySelector('#' + routeId);
       if (!el) return;
       const ownerId = view.routeOwner[routeId];
-      el.classList.remove('ttr-claimable', 'ttr-selected', 'ttr-suggested');
-      if (ttrSuggestedPath && ttrSuggestedPath.routeIds.has(routeId)) el.classList.add('ttr-suggested');
+      el.classList.remove('ttr-claimable', 'ttr-selected', 'ttr-suggested-mine', 'ttr-suggested-needed');
+      if (ttrSuggestedPath && ttrSuggestedPath.routeIds.has(routeId)) {
+        // уже мой (построен или подключён станцией) кусок пути — зелёным,
+        // ещё не построенный — обычным цветом подсказки; чтобы игрок видел,
+        // что из маршрута уже готово, а что ещё предстоит построить
+        const isMine = ownerId === myId || myLinkedRoutes.has(routeId);
+        el.classList.add(isMine ? 'ttr-suggested-mine' : 'ttr-suggested-needed');
+      }
       if (ttrPaymentState && ttrPaymentState.routeId === routeId) el.classList.add('ttr-selected');
       if (ownerId) {
         const player = (view.ttrPlayers || []).find(p => p.id === ownerId);
@@ -1455,8 +1643,17 @@
       const from = route && ttrAssets.citiesById[route.from];
       const to = route && ttrAssets.citiesById[route.to];
       if (!from || !to) return;
-      const midX = (from.x + to.x) / 2;
-      const midY = (from.y + to.y) / 2;
+      // центр — из реальной отрисованной геометрии ЭТОЙ КОНКРЕТНОЙ полосы
+      // маршрута (getBBox), а не усреднённо по координатам городов: на
+      // маршрутах с двумя параллельными "дорожками" между одними и теми же
+      // городами (variant 1/2, напр. route_berlin_warszawa_1/_2) середина
+      // по городам одна и та же для обеих дорожек, хотя визуально они
+      // разнесены — метка станции "уезжала" в промежуток между дорожками
+      // вместо той, на которой реально построена станция
+      const routeEl = svg.querySelector('#' + routeId);
+      const bbox = routeEl ? routeEl.getBBox() : null;
+      const midX = bbox ? bbox.x + bbox.width / 2 : (from.x + to.x) / 2;
+      const midY = bbox ? bbox.y + bbox.height / 2 : (from.y + to.y) / 2;
       const angleRad = Math.atan2(to.y - from.y, to.x - from.x);
       const angleDeg = (angleRad * 180) / Math.PI;
       const spacing = 140; // если станций на одном пути несколько — раздвигаем вдоль него
@@ -1715,7 +1912,7 @@
   }
 
   function ttrTicketRow(t, idx) {
-    const isActive = ttrSuggestedPath && ttrSuggestedPath.idx === idx;
+    const isActive = ttrSuggestedPath && ttrSuggestedPath.source === 'owned' && ttrSuggestedPath.idx === idx;
     const cls = `ttr-ticket-row ttr-ticket-card ${t.long ? 'ttr-ticket-long' : 'ttr-ticket-short'}${t.fulfilled ? ' ttr-ticket-fulfilled' : ''}${isActive ? ' ttr-ticket-active' : ''}`;
     return `<div class="${cls}" data-idx="${idx}" data-from="${t.from}" data-to="${t.to}" style="background-image:url(${ttrTicketImagePath(t)})" title="${escapeHtml(ttrTicketTitle(t))}"></div>`;
   }
@@ -1728,14 +1925,29 @@
     $('#btn-ttr-draw-tickets').disabled = !ttrCanAct(view);
   }
 
+  // гасит подсказку пути на карте, если она сейчас от пикера билетов
+  // (а не от клика по «Мои билеты» — те независимы, см. source). Красит
+  // маршруты заново сама — вызывается уже ПОСЛЕ paintTtrRoutes() в общем
+  // рендер-проходе (см. renderTtrGame), иначе подсветка пути зависала бы
+  // на карте до следующего обновления view
+  function ttrClearPickerSuggestion(view) {
+    if (ttrSuggestedPath && ttrSuggestedPath.source === 'picker') {
+      ttrHighlightCities(ttrSuggestedPath.from, ttrSuggestedPath.to, false);
+      ttrSuggestedPath = null;
+      if (view) paintTtrRoutes(view);
+    }
+  }
+
   function renderTtrTicketPicker(view) {
-    const overlay = $('#ttr-ticket-picker');
-    const heading = overlay.querySelector('h3');
+    const dock = $('#ttr-ticket-picker');
+    const gamePanel = $('#ttr-panel');
+    const heading = dock.querySelector('h3');
     const confirmBtn = $('#btn-ttr-confirm-tickets');
     const pending = view.myPendingTickets;
 
     if (pending) {
-      overlay.hidden = false;
+      dock.hidden = false;
+      gamePanel.hidden = true;
       heading.textContent = 'Выберите билеты';
       confirmBtn.hidden = false;
       const key = pending.map(t => `${t.from}-${t.to}`).join('|');
@@ -1743,25 +1955,36 @@
         ttrTicketPickerKey = key;
         // по умолчанию оставляем все — игрок сам снимает лишние выше минимума
         ttrTicketPickerSelected = new Set(pending.map((_, i) => i));
+        ttrClearPickerSuggestion(view);
       }
-      const minKeep = view.myPendingTicketsMinKeep || 1;
-      $('#ttr-ticket-picker-hint').textContent = `Оставьте минимум ${minKeep} из ${pending.length}`;
+      $('#ttr-ticket-picker-hint').textContent = `Оставьте минимум ${view.myPendingTicketsMinKeep || 1} из ${pending.length}. Клик по картинке — посмотреть маршрут на карте, галочка в углу — оставить/отклонить билет.`;
       $('#ttr-ticket-picker-list').innerHTML = pending.map((t, i) => {
         const selected = ttrTicketPickerSelected.has(i);
-        const cls = `ttr-ticket-pick ttr-ticket-card ${t.long ? 'ttr-ticket-long' : 'ttr-ticket-short'} ${selected ? 'selected' : ''}`;
-        return `<button type="button" class="${cls}" data-idx="${i}" style="background-image:url(${ttrTicketImagePath(t)})" title="${escapeHtml(ttrTicketTitle(t))}"></button>`;
+        // клик по картинке карточки — только просмотр маршрута на карте,
+        // саму карточку никак не подсвечивает; единственный сигнал на
+        // карточке — зелёная подсветка при выборе (галочка + вся карточка)
+        const cls = `ttr-ticket-pick ttr-ticket-card ${t.long ? 'ttr-ticket-long' : 'ttr-ticket-short'}${selected ? ' selected' : ''}`;
+        const toggleTitle = selected ? 'Не оставлять этот билет' : 'Оставить этот билет';
+        return `
+          <div class="${cls}" data-idx="${i}">
+            <button type="button" class="ttr-ticket-pick-preview" style="background-image:url(${ttrTicketImagePath(t)})" title="${escapeHtml(ttrTicketTitle(t))}"></button>
+            <button type="button" class="ttr-ticket-pick-toggle${selected ? ' selected' : ''}" title="${toggleTitle}">${selected ? '✓' : ''}</button>
+          </div>
+        `;
       }).join('');
-      confirmBtn.disabled = ttrTicketPickerSelected.size < minKeep;
+      confirmBtn.disabled = ttrTicketPickerSelected.size < (view.myPendingTicketsMinKeep || 1);
       return;
     }
 
     ttrTicketPickerKey = null;
+    ttrClearPickerSuggestion(view);
     // фаза initial-tickets общая на всех — пока хоть кто-то не выбрал,
     // партия не переходит в 'playing'; сам я мог уже выбрать и жду других,
     // показываем это явно, а не тихо распахиваем игровое поле
-    if (view.phase !== 'initial-tickets') { overlay.hidden = true; return; }
+    if (view.phase !== 'initial-tickets') { dock.hidden = true; gamePanel.hidden = false; return; }
 
-    overlay.hidden = false;
+    dock.hidden = false;
+    gamePanel.hidden = true;
     heading.textContent = 'Ожидание';
     confirmBtn.hidden = true;
     const waitingNames = (view.awaitingInitialTickets || [])
@@ -1781,7 +2004,183 @@
       </tr>
     `).join('');
     $('#ttr-finished-scores').innerHTML = `<thead><tr><th>Игрок</th><th>Очки</th></tr></thead><tbody>${rows}</tbody>`;
+
+    // разбивку очков показываем только для себя — подробности чужих очков
+    // за столом обычно не нужны, а список на всех игроков раздувал экран
+    const me = players.find(p => p.id === view.me?.id);
+    const log = me ? [...(me.scoreLog || [])].sort((a, b) => a.ts - b.ts) : [];
+    const items = log.map((e) => {
+      const pts = e.points >= 0 ? `+${e.points}` : `${e.points}`;
+      // "маршрут"/"билет" — есть конкретное место на карте, кликабельны
+      // (см. обработчик #ttr-finished-breakdown); у бонуса за длинный путь
+      // и штрафа за станции такого места нет — просто строки
+      const dataAttrs = e.type === 'route' ? `data-type="route" data-route-id="${e.routeId}"`
+        : e.type === 'ticket' ? `data-type="ticket" data-from="${e.from}" data-to="${e.to}"`
+        : '';
+      const cls = dataAttrs ? ' class="ttr-score-log-clickable"' : '';
+      return `<li${cls}${dataAttrs ? ' ' + dataAttrs : ''}><span>${ttrScoreLogText(e)}</span><b class="${e.points >= 0 ? 'ttr-score-pos' : 'ttr-score-neg'}">${pts}</b></li>`;
+    }).join('');
+    $('#ttr-finished-breakdown').innerHTML = me ? `
+      <div class="ttr-score-breakdown-player">
+        <ul class="ttr-score-breakdown-list">${items || '<li class="hint-text">Нет начислений</li>'}</ul>
+      </div>
+    ` : '';
   }
+
+  // текстовое описание одной записи журнала очков — "когда и за что"
+  // (порядок записей уже хронологический, см. сортировку по ts выше)
+  function ttrScoreLogText(entry) {
+    if (entry.type === 'route') {
+      const route = ttrAssets.routesById[entry.routeId];
+      const from = route ? (ttrAssets.citiesById[route.from]?.name || route.from) : entry.routeId;
+      const to = route ? (ttrAssets.citiesById[route.to]?.name || route.to) : '';
+      return `Маршрут ${escapeHtml(from)} — ${escapeHtml(to)}`;
+    }
+    if (entry.type === 'ticket') {
+      const from = ttrAssets.citiesById[entry.from]?.name || entry.from;
+      const to = ttrAssets.citiesById[entry.to]?.name || entry.to;
+      return `Билет ${escapeHtml(from)} → ${escapeHtml(to)} (${entry.fulfilled ? 'выполнен' : 'не выполнен'})`;
+    }
+    if (entry.type === 'longest-path') {
+      return `Бонус за самый длинный путь (${entry.length} вагон.)`;
+    }
+    if (entry.type === 'station-penalty') {
+      return `Штраф за неиспользованные станции (${entry.count} шт.)`;
+    }
+    return entry.type;
+  }
+
+  // карта на экране результатов — статичная (без пан/зума, в отличие от
+  // игрового экрана): вся партия и так видна целиком, крутить нечего.
+  // Монтируется один раз за комнату (структура карты не меняется между
+  // партиями, перевставлять дорогой ~2.4МБ DOM ради каждой новой партии
+  // незачем) — перекрашивается заново при каждом показе финального экрана.
+  let ttrFinishedMapMounted = false;
+  function mountTtrFinishedMap() {
+    const container = $('#ttr-finished-map-container');
+    if (!container) return;
+    container.innerHTML = ttrAssets.svgText;
+    const svg = container.querySelector('svg');
+    if (svg) {
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      buildTtrOwnerGradients(svg);
+    }
+  }
+
+  // красит все маршруты по их итоговому владельцу — просто финальная
+  // картина доски, без ttrClaimable/ttrSelected и прочего игрового
+  // состояния (игра уже кончилась, эти понятия тут не нужны)
+  function paintTtrFinishedRoutes(view) {
+    const container = $('#ttr-finished-map-container');
+    if (!container) return;
+    Object.keys(ttrAssets.routesById).forEach((routeId) => {
+      const el = container.querySelector('#' + routeId);
+      if (!el) return;
+      const ownerId = view.routeOwner[routeId];
+      if (ownerId) {
+        const player = (view.ttrPlayers || []).find((p) => p.id === ownerId);
+        paintRouteShapes(el, player?.color);
+      }
+    });
+  }
+
+  // путь между городами билета ВНУТРИ уже построенной (к концу игры) сети
+  // самого игрока — не "как было бы дешевле", а как реально вышло сыграть;
+  // для невыполненного билета вернёт null (никакого пути и не было)
+  function ttrOwnedPathBetween(view, fromCity, toCity) {
+    if (fromCity === toCity) return [];
+    const myId = view.me?.id;
+    const myRoutes = new Set([
+      ...Object.keys(view.routeOwner || {}).filter((id) => view.routeOwner[id] === myId),
+      ...(view.stationMarkers || []).filter((m) => m.playerId === myId).map((m) => m.routeId),
+    ]);
+    const adj = new Map();
+    myRoutes.forEach((routeId) => {
+      const r = ttrAssets.routesById[routeId];
+      if (!r) return;
+      if (!adj.has(r.from)) adj.set(r.from, []);
+      if (!adj.has(r.to)) adj.set(r.to, []);
+      adj.get(r.from).push({ to: r.to, routeId });
+      adj.get(r.to).push({ to: r.from, routeId });
+    });
+    const cameFrom = new Map();
+    const visited = new Set([fromCity]);
+    const queue = [fromCity];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (cur === toCity) break;
+      for (const { to, routeId } of adj.get(cur) || []) {
+        if (visited.has(to)) continue;
+        visited.add(to);
+        cameFrom.set(to, { prevCity: cur, routeId });
+        queue.push(to);
+      }
+    }
+    if (!cameFrom.has(toCity)) return null;
+    const path = [];
+    let node = toCity;
+    while (node !== fromCity) {
+      const step = cameFrom.get(node);
+      path.push(step.routeId);
+      node = step.prevCity;
+    }
+    return path;
+  }
+
+  let ttrFinishedHighlightRouteIds = [];
+  let ttrFinishedHighlightCities = null; // { from, to }
+  function ttrClearFinishedHighlight() {
+    const container = $('#ttr-finished-map-container');
+    if (!container) return;
+    ttrFinishedHighlightRouteIds.forEach((routeId) => {
+      const el = container.querySelector('#' + routeId);
+      if (el) el.classList.remove('ttr-finished-highlight');
+    });
+    ttrFinishedHighlightRouteIds = [];
+    if (ttrFinishedHighlightCities) {
+      ttrHighlightCities(ttrFinishedHighlightCities.from, ttrFinishedHighlightCities.to, false, container);
+      ttrFinishedHighlightCities = null;
+    }
+  }
+
+  $('#ttr-finished-breakdown').addEventListener('click', (e) => {
+    const li = e.target.closest('.ttr-score-log-clickable');
+    if (!li || !state.lastView) return;
+    const container = $('#ttr-finished-map-container');
+    if (!container) return;
+
+    ttrClearFinishedHighlight();
+    $all('#ttr-finished-breakdown .ttr-score-log-active').forEach((el) => el.classList.remove('ttr-score-log-active'));
+
+    let from;
+    let to;
+    let routeIds;
+    if (li.dataset.type === 'route') {
+      const route = ttrAssets.routesById[li.dataset.routeId];
+      if (!route) return;
+      from = route.from;
+      to = route.to;
+      routeIds = [li.dataset.routeId];
+    } else {
+      from = li.dataset.from;
+      to = li.dataset.to;
+      // билет мог остаться невыполненным — тогда своего пути между
+      // городами нет вообще, подсвечиваем только сами города
+      routeIds = ttrOwnedPathBetween(state.lastView, from, to) || [];
+    }
+
+    li.classList.add('ttr-score-log-active');
+    routeIds.forEach((routeId) => {
+      const el = container.querySelector('#' + routeId);
+      if (el) el.classList.add('ttr-finished-highlight');
+    });
+    ttrHighlightCities(from, to, true, container);
+    ttrFinishedHighlightRouteIds = routeIds;
+    ttrFinishedHighlightCities = { from, to };
+    container.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
 
   // --- обработчики (делегирование на статичные контейнеры — переживает
   // перерисовку innerHTML динамических списков внутри них) ---
@@ -1805,8 +2204,8 @@
   // клик на карточку билета (в списке "Мои билеты") подсвечивает на карте
   // два города, которые этот билет требует связать — держится до снятия
   // подсказки, наведение курсора тут больше ни при чём
-  function ttrHighlightCities(fromId, toId, on) {
-    const container = $('#ttr-map-container');
+  function ttrHighlightCities(fromId, toId, on, container = $('#ttr-map-container')) {
+    if (!container) return;
     [fromId, toId].forEach((cityId) => {
       const el = container.querySelector('#city_' + cityId);
       if (el) el.classList.toggle('ttr-city-highlight', on);
@@ -1819,7 +2218,7 @@
     const idx = Number(row.dataset.idx);
 
     // повторный клик по тому же билету — снять подсказку и погасить его города
-    if (ttrSuggestedPath && ttrSuggestedPath.idx === idx) {
+    if (ttrSuggestedPath && ttrSuggestedPath.source === 'owned' && ttrSuggestedPath.idx === idx) {
       ttrHighlightCities(ttrSuggestedPath.from, ttrSuggestedPath.to, false);
       ttrSuggestedPath = null;
       paintTtrRoutes(state.lastView);
@@ -1835,7 +2234,7 @@
       alert('Соперники заняли все маршруты между этими городами — билет больше не выполнить.');
       ttrSuggestedPath = null;
     } else {
-      ttrSuggestedPath = { idx, from: row.dataset.from, to: row.dataset.to, routeIds: new Set(path) };
+      ttrSuggestedPath = { source: 'owned', idx, from: row.dataset.from, to: row.dataset.to, routeIds: new Set(path) };
       ttrHighlightCities(row.dataset.from, row.dataset.to, true);
     }
     paintTtrRoutes(state.lastView);
@@ -1849,13 +2248,36 @@
   function ttrDist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
   function ttrMid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
+  // В Safari/WebKit хит-тестирование указателя по такому большому и сложному
+  // SVG (2.4МБ, viewBox 14472×11804, сотни путей) само по себе на порядок
+  // дороже, чем в Chromium — драг карты давал ~8 fps даже когда наши
+  // обработчики вообще ничего не делали (проверено отдельно), т.е. тормозит
+  // не наш JS, а сам браузер при попытке понять, над каким элементом курсор
+  // на каждое событие. На время активного перетаскивания/зума маршруты под
+  // курсором роли не играют (кликнуть по ним всё равно нельзя, пока драг не
+  // завершится), поэтому на это время отключаем pointer-events у самого
+  // <svg> — событию тогда некуда "проваливаться" глубже контейнера, и
+  // хит-тест почти бесплатный. Возвращаем обратно по окончании
+  // взаимодействия — обычные клики по маршрутам продолжают работать.
+  function ttrSetSvgInteractive(enabled) {
+    const svg = ttrMapSvg();
+    if (svg) svg.style.pointerEvents = enabled ? '' : 'none';
+  }
+
   {
     const mapContainer = $('#ttr-map-container');
 
-    // колесо мыши — зум к точке под курсором (десктоп)
+    // колесо мыши — зум к точке под курсором (десктоп). Отдельного
+    // "конца" у серии wheel-событий нет (в отличие от pointerup) —
+    // отключаем интерактивность SVG на первый тик и включаем обратно
+    // через debounce-таймер после паузы в событиях
+    let ttrWheelIdleTimer = null;
     mapContainer.addEventListener('wheel', (e) => {
       if (!ttrMapSvg()) return;
       e.preventDefault();
+      ttrSetSvgInteractive(false);
+      clearTimeout(ttrWheelIdleTimer);
+      ttrWheelIdleTimer = setTimeout(() => ttrSetSvgInteractive(true), 200);
       const { x, y } = ttrPointerPos(e, mapContainer);
       const factor = e.deltaY < 0 ? TTR_WHEEL_ZOOM_FACTOR : 1 / TTR_WHEEL_ZOOM_FACTOR;
       ttrZoomAt(x, y, ttrZoom * factor);
@@ -1876,6 +2298,7 @@
       if (!ttrMapSvg()) return;
       mapContainer.setPointerCapture(e.pointerId);
       ttrPointerDownTarget = e.target;
+      ttrSetSvgInteractive(false);
       const pos = ttrPointerPos(e, mapContainer);
       ttrActivePointers.set(e.pointerId, pos);
       ttrPointerMoved = 0;
@@ -1925,6 +2348,7 @@
       if (ttrActivePointers.size === 0) {
         ttrDragStart = null;
         if (ttrPointerMoved > TTR_DRAG_CLICK_THRESHOLD) ttrSuppressNextClick = true;
+        ttrSetSvgInteractive(true);
       }
     }
     mapContainer.addEventListener('pointerup', ttrPointerEnd);
@@ -1974,11 +2398,40 @@
   });
 
   $('#ttr-ticket-picker-list').addEventListener('click', (e) => {
-    const btn = e.target.closest('.ttr-ticket-pick');
-    if (!btn) return;
-    const idx = Number(btn.dataset.idx);
-    if (ttrTicketPickerSelected.has(idx)) ttrTicketPickerSelected.delete(idx);
-    else ttrTicketPickerSelected.add(idx);
+    const card = e.target.closest('.ttr-ticket-pick');
+    if (!card || !state.lastView) return;
+    const idx = Number(card.dataset.idx);
+
+    // галочка в углу — только решение "оставляю/не оставляю", карты не
+    // трогает вообще
+    if (e.target.closest('.ttr-ticket-pick-toggle')) {
+      if (ttrTicketPickerSelected.has(idx)) ttrTicketPickerSelected.delete(idx);
+      else ttrTicketPickerSelected.add(idx);
+      renderTtrTicketPicker(state.lastView);
+      return;
+    }
+
+    // сама картинка билета — только "покажи мне этот маршрут на карте",
+    // выбор оставить/выкинуть не трогает; независимые действия, разведены
+    // по разным элементам карточки, а не по одному клику сразу на оба смысла
+    if (!e.target.closest('.ttr-ticket-pick-preview')) return;
+    const t = (state.lastView.myPendingTickets || [])[idx];
+    if (!t) return;
+    if (ttrSuggestedPath) ttrHighlightCities(ttrSuggestedPath.from, ttrSuggestedPath.to, false);
+    const path = ttrFindBestPath(state.lastView, t.from, t.to);
+    if (path) {
+      ttrSuggestedPath = { source: 'picker', idx, from: t.from, to: t.to, routeIds: new Set(path) };
+      ttrHighlightCities(t.from, t.to, true);
+      ttrFitToCities([t.from, t.to]);
+      // пикер лежит под картой — на невысоком экране клик по нижней
+      // карточке может проскроллить страницу вниз, к самому пикеру,
+      // и увести карту с подсвеченным маршрутом за пределы видимой
+      // области; прокручиваем обратно, чтобы маршрут правда было видно
+      $('.ttr-map-wrap').scrollIntoView({ block: 'nearest' });
+    } else {
+      ttrSuggestedPath = null;
+    }
+    paintTtrRoutes(state.lastView);
     renderTtrTicketPicker(state.lastView);
   });
 
@@ -2063,6 +2516,12 @@
     $('#btn-toggle-games').hidden = !(view.pastGames && view.pastGames.length);
     if (state.gamesOpen) renderGamesList(view);
     const isTtr = view.gameType === 'ttr';
+    if (isTtr) {
+      const myTurnNow = (view.phase === 'playing' || view.phase === 'final-round')
+        && view.currentPlayerId === view.me?.id;
+      if (myTurnNow && state.ttrLastCurrentPlayerId !== view.currentPlayerId) playTtrTurnSound();
+      state.ttrLastCurrentPlayerId = view.currentPlayerId;
+    }
     if (view.status === 'lobby') {
       state.historyOpen = false;
       $('#history-panel').hidden = true;
@@ -2087,6 +2546,8 @@
   let chatUnread = 0;
   let lastRenderedChatLen = 0;
   let chatReplyTo = null; // { id, name, text } — на какое сообщение сейчас отвечаем
+  let chatEditingId = null; // id сообщения, которое сейчас редактируем (или null)
+  let lastMarkedChatReadId = null; // id последнего сообщения, за которое уже отправили mark-chat-read
 
   // цвет имени — детерминированный хеш от playerId, не от команды (команды
   // нет в TTR вообще, а тут нужен цвет для любого участника в любой игре)
@@ -2115,6 +2576,17 @@
     bar.querySelector('.chat-reply-preview-snippet').textContent = chatReplyTo.text;
   }
 
+  function renderChatEditPreview() {
+    $('#chat-edit-preview').hidden = !chatEditingId;
+  }
+
+  // "прочитано хоть кем-то, кроме автора" — приблизительно, по последнему
+  // разу, когда игрок открывал чат (view.chatRead[playerId]), а не по
+  // каждому сообщению отдельно (см. план/сервер markChatRead)
+  function chatReadByOthers(view, msg) {
+    return Object.entries(view.chatRead || {}).some(([pid, ts]) => pid !== msg.playerId && ts >= msg.ts);
+  }
+
   function renderChat(view) {
     const chat = view.chat || [];
     const list = $('#chat-messages');
@@ -2132,14 +2604,26 @@
       const replyHtml = m.replyTo
         ? `<div class="chat-reply-quote"><b>${escapeHtml(m.replyTo.name)}</b>: ${escapeHtml(m.replyTo.text)}</div>`
         : '';
+      const editedHtml = m.edited ? '<span class="chat-msg-edited">изменено</span>' : '';
+      // галочки и карандаш — только на своих сообщениях; статус прочтения
+      // чужих сообщений себе не нужен, редактировать чужое нельзя
+      const receiptHtml = mine
+        ? `<span class="chat-msg-receipt ${chatReadByOthers(view, m) ? 'read' : ''}" title="Кто прочитал">${chatReadByOthers(view, m) ? '✓✓' : '✓'}</span>`
+        : '';
+      const editBtnHtml = mine
+        ? '<button type="button" class="chat-msg-edit-btn" title="Редактировать">✎</button>'
+        : '';
       return `
         <div class="chat-msg ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}" style="--chat-color:${chatColorFor(m.playerId)}" data-id="${m.id}">
           ${!grouped ? `<span class="chat-msg-name">${escapeHtml(m.name)}</span>` : ''}
+          <span class="chat-swipe-reply-icon">↩</span>
           <div class="chat-bubble">
+            ${editBtnHtml}
             ${replyHtml}
             <span class="chat-msg-text">${escapeHtml(m.text)}</span>
-            <span class="chat-msg-time">${chatTimeLabel(m.ts)}</span>
+            <span class="chat-msg-time">${chatTimeLabel(m.ts)}${editedHtml}</span>
           </div>
+          ${receiptHtml}
         </div>
       `;
     }).join('') || '<p class="hint-text">Пока никто ничего не написал</p>';
@@ -2157,6 +2641,20 @@
     if (state.chatOpen || wasAtBottom) {
       list.scrollTop = list.scrollHeight;
     }
+    maybeMarkChatRead(view);
+  }
+
+  // отправляем "прочитано" не чаще одного раза на новый последний id — и
+  // при открытии панели (ниже), и при приходе новых сообщений, пока она уже
+  // открыта (см. вызов в конце renderChat)
+  function maybeMarkChatRead(view) {
+    if (!state.chatOpen) return;
+    const chat = view?.chat || [];
+    if (!chat.length) return;
+    const latestId = chat[chat.length - 1].id;
+    if (latestId === lastMarkedChatReadId) return;
+    lastMarkedChatReadId = latestId;
+    emit('mark-chat-read', {});
   }
 
   $('#btn-toggle-chat').addEventListener('click', () => {
@@ -2167,6 +2665,7 @@
       updateChatBadge();
       const list = $('#chat-messages');
       list.scrollTop = list.scrollHeight;
+      if (state.lastView) maybeMarkChatRead(state.lastView);
     }
   });
   $('#btn-close-chat').addEventListener('click', () => {
@@ -2174,21 +2673,149 @@
     $('#chat-panel').hidden = true;
   });
 
-  // ответ вызывается правым кликом по сообщению, а не отдельной кнопкой —
-  // гасим нативное контекстное меню браузера и открываем реплай сами
+  function startChatReply(msg) {
+    chatReplyTo = { id: msg.id, name: msg.name, text: msg.text.slice(0, 140) };
+    // отвечать и редактировать разом нельзя — новое действие гасит старое
+    chatEditingId = null;
+    renderChatEditPreview();
+    renderChatReplyPreview();
+    $('#chat-input').focus();
+  }
+
+  // ответ вызывается правым кликом по сообщению (десктоп) или свайпом
+  // влево (тач, см. pointer-обработчики ниже) — гасим нативное контекстное
+  // меню браузера и открываем реплай сами
   $('#chat-messages').addEventListener('contextmenu', (e) => {
     const row = e.target.closest('.chat-msg');
     if (!row) return;
     e.preventDefault();
     const msg = (state.lastView?.chat || []).find(m => m.id === row.dataset.id);
     if (!msg) return;
-    chatReplyTo = { id: msg.id, name: msg.name, text: msg.text.slice(0, 140) };
-    renderChatReplyPreview();
-    $('#chat-input').focus();
+    startChatReply(msg);
   });
   $('#btn-chat-reply-cancel').addEventListener('click', () => {
     chatReplyTo = null;
     renderChatReplyPreview();
+  });
+
+  function startChatEdit(msg) {
+    chatEditingId = msg.id;
+    chatReplyTo = null;
+    renderChatReplyPreview();
+    renderChatEditPreview();
+    $('#chat-edit-preview').querySelector('.chat-reply-preview-snippet').textContent = msg.text.slice(0, 140);
+    const input = $('#chat-input');
+    input.value = msg.text;
+    autoResizeChatInput();
+    input.focus();
+  }
+  $('#btn-chat-edit-cancel').addEventListener('click', () => {
+    chatEditingId = null;
+    renderChatEditPreview();
+    $('#chat-input').value = '';
+    autoResizeChatInput();
+  });
+
+  // --- свайп влево по сообщению (только тач) — тот же реплай, что и
+  // правый клик на десктопе. pointerdown/move/up вместо touchstart/move/end
+  // — единообразно с уже существующим драгом карты в TTR (см. выше по файлу)
+  let chatSwipe = null; // { row, startX, startY, committed, dx, pointerId }
+  let chatSuppressNextClick = false;
+  const CHAT_SWIPE_MAX = 80;
+  const CHAT_SWIPE_TRIGGER = 60;
+
+  $('#chat-messages').addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    const row = e.target.closest('.chat-msg');
+    if (!row) return;
+    chatSwipe = { row, startX: e.clientX, startY: e.clientY, committed: false, dx: 0, pointerId: e.pointerId };
+  });
+
+  $('#chat-messages').addEventListener('pointermove', (e) => {
+    if (!chatSwipe || e.pointerId !== chatSwipe.pointerId) return;
+    const dx = e.clientX - chatSwipe.startX;
+    const dy = e.clientY - chatSwipe.startY;
+    if (!chatSwipe.committed) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return; // рано понимать, свайп это или скролл
+      if (Math.abs(dx) <= Math.abs(dy)) { chatSwipe = null; return; } // вертикальный скролл — не наше, отдаём браузеру
+      chatSwipe.committed = true;
+      chatSwipe.row.setPointerCapture(e.pointerId);
+      chatSwipe.row.querySelector('.chat-bubble')?.classList.add('chat-swiping');
+    }
+    const clamped = dx < 0 ? Math.max(dx, -CHAT_SWIPE_MAX) : 0; // отвечаем только на свайп влево
+    chatSwipe.dx = clamped;
+    const bubble = chatSwipe.row.querySelector('.chat-bubble');
+    if (bubble) bubble.style.transform = clamped ? `translateX(${clamped}px)` : '';
+    const icon = chatSwipe.row.querySelector('.chat-swipe-reply-icon');
+    if (icon) icon.style.opacity = String(Math.min(1, -clamped / CHAT_SWIPE_TRIGGER));
+  });
+
+  function endChatSwipe(e) {
+    if (!chatSwipe || (e && e.pointerId !== chatSwipe.pointerId)) return;
+    const { row, dx, committed } = chatSwipe;
+    const bubble = row.querySelector('.chat-bubble');
+    bubble?.classList.remove('chat-swiping');
+    if (bubble) bubble.style.transform = ''; // .chat-bubble transition сама анимирует возврат
+    const icon = row.querySelector('.chat-swipe-reply-icon');
+    if (icon) icon.style.opacity = '0';
+    if (committed) {
+      chatSuppressNextClick = true; // синтетический click после драга не должен открыть редактирование/поповер
+      if (dx <= -CHAT_SWIPE_TRIGGER) {
+        const msg = (state.lastView?.chat || []).find(m => m.id === row.dataset.id);
+        if (msg) startChatReply(msg);
+      }
+    }
+    chatSwipe = null;
+  }
+  $('#chat-messages').addEventListener('pointerup', endChatSwipe);
+  $('#chat-messages').addEventListener('pointercancel', endChatSwipe);
+
+  // --- галочки статуса прочтения — клик открывает список "кто/когда" ---
+  function closeChatReadPopover() {
+    $('#chat-read-popover')?.remove();
+    document.removeEventListener('click', onChatReadPopoverOutsideClick, true);
+  }
+  function onChatReadPopoverOutsideClick(e) {
+    if (e.target.closest('#chat-read-popover') || e.target.closest('.chat-msg-receipt')) return;
+    closeChatReadPopover();
+  }
+  function toggleChatReadPopover(anchorEl, msg) {
+    if ($('#chat-read-popover')) { closeChatReadPopover(); return; }
+    const others = (state.lastView?.players || []).filter(p => p.id !== clientId);
+    const chatRead = state.lastView?.chatRead || {};
+    const rows = others.map((p) => {
+      const ts = chatRead[p.id];
+      const read = ts && ts >= msg.ts;
+      return `<div class="chat-read-popover-row${read ? ' read' : ''}"><span>${escapeHtml(p.name)}</span><span>${read ? chatTimeLabel(ts) : 'не прочитано'}</span></div>`;
+    }).join('') || '<div class="chat-read-popover-row hint-text">Нет других игроков</div>';
+    const popover = document.createElement('div');
+    popover.id = 'chat-read-popover';
+    popover.className = 'chat-read-popover';
+    popover.innerHTML = rows;
+    document.body.appendChild(popover);
+    const rect = anchorEl.getBoundingClientRect();
+    popover.style.top = `${rect.bottom + 6}px`;
+    popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8))}px`;
+    // подписка со сдвигом на следующий тик — иначе этот же клик, всплыв до
+    // document, сразу же закрыл бы только что открытый поповер
+    setTimeout(() => document.addEventListener('click', onChatReadPopoverOutsideClick, true), 0);
+  }
+
+  $('#chat-messages').addEventListener('click', (e) => {
+    if (chatSuppressNextClick) { chatSuppressNextClick = false; return; }
+    const editBtn = e.target.closest('.chat-msg-edit-btn');
+    if (editBtn) {
+      const row = editBtn.closest('.chat-msg');
+      const msg = (state.lastView?.chat || []).find(m => m.id === row?.dataset.id);
+      if (msg) startChatEdit(msg);
+      return;
+    }
+    const receipt = e.target.closest('.chat-msg-receipt');
+    if (receipt) {
+      const row = receipt.closest('.chat-msg');
+      const msg = (state.lastView?.chat || []).find(m => m.id === row?.dataset.id);
+      if (msg) toggleChatReadPopover(receipt, msg);
+    }
   });
 
   function autoResizeChatInput() {
@@ -2209,6 +2836,16 @@
     const input = $('#chat-input');
     const text = input.value.trim();
     if (!text) return;
+    if (chatEditingId) {
+      const id = chatEditingId;
+      input.value = '';
+      autoResizeChatInput();
+      chatEditingId = null;
+      renderChatEditPreview();
+      const res = await emit('edit-chat', { id, text });
+      if (res.error) alert(res.error);
+      return;
+    }
     input.value = '';
     autoResizeChatInput();
     const replyToId = chatReplyTo?.id || null;

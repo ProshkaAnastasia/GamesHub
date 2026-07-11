@@ -278,6 +278,24 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
+  socket.on('edit-chat', ({ id, text }, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.editMessage(s.playerId, id, text);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
+  socket.on('mark-chat-read', (_, cb) => {
+    const s = sessions.get(socket.id);
+    const room = s && manager.get(s.roomCode);
+    if (!room) return cb?.({ error: 'Нет комнаты' });
+    const res = room.markChatRead(s.playerId);
+    cb?.(res);
+    if (res.ok) broadcastRoom(room);
+  });
+
   socket.on('leave-room', (_, cb) => {
     // осознанный выход разрешён только тогда, когда он не ломает текущий
     // раунд команды; обрыв связи (когда игрок ничего не выбирал) — другое

@@ -28,7 +28,11 @@ class Room {
     // каждую партию), формой ключей заведует выбранный игровой модуль
     this.teamOrder = {};
     this.usedWords = new Set(); // слова, уже сыгранные в этой комнате — не повторяем, пока не закончатся все
-    this.chat = []; // {id, playerId, name, team, text, ts} — общий чат комнаты, живёт дольше одной игры
+    this.chat = []; // {id, playerId, name, team, text, ts, replyTo, edited} — общий чат комнаты, живёт дольше одной игры
+    // playerId -> ts последнего открытия чата этим игроком — приблизительный
+    // статус прочтения ("прочитано" = чат открывали после ts сообщения), не
+    // по каждому сообщению отдельно (см. markChatRead)
+    this.chatRead = {};
     // архив завершённых игр в этой комнате — заполняется в playAgain(),
     // прежде чем состояние игры сбрасывается для новой партии; секретов
     // тут уже нет (игра окончена), поэтому храним данные как есть
@@ -103,6 +107,27 @@ class Room {
     // ограничиваем историю, чтобы комната не росла бесконечно
     if (this.chat.length > 200) this.chat = this.chat.slice(-200);
     return { ok: true, message };
+  }
+
+  // редактировать можно только своё сообщение — чужой id молча не найдёт
+  // совпадения по playerId и вернёт ошибку, а не тихо облажается
+  editMessage(playerId, id, text) {
+    const message = this.chat.find((m) => m.id === id);
+    if (!message) return { error: 'Сообщение не найдено' };
+    if (message.playerId !== playerId) return { error: 'Можно редактировать только свои сообщения' };
+    const trimmed = (text || '').trim().slice(0, 300);
+    if (!trimmed) return { error: 'Пустое сообщение' };
+    message.text = trimmed;
+    message.edited = true;
+    return { ok: true, message };
+  }
+
+  // приблизительный статус прочтения — просто "игрок открывал чат в
+  // момент ts", а не отметка по каждому конкретному сообщению
+  markChatRead(playerId) {
+    if (!this.players.has(playerId)) return { error: 'Игрок не найден' };
+    this.chatRead[playerId] = Date.now();
+    return { ok: true };
   }
 
   setTeam(id, team) {
@@ -234,6 +259,7 @@ class Room {
       gameType: this.gameType,
       availableGameTypes: GAME_LIST,
       chat: this.chat,
+      chatRead: this.chatRead,
       pastGames: this.pastGames,
       players: playersList,
       hostId: this.hostId,
@@ -259,6 +285,7 @@ class Room {
       teamOrder: this.teamOrder,
       usedWords: [...this.usedWords],
       chat: this.chat,
+      chatRead: this.chatRead,
       pastGames: this.pastGames,
       game: this.game ? this.game.toJSON() : null,
     };
@@ -280,6 +307,7 @@ class Room {
     room.teamOrder = data.teamOrder || {};
     room.usedWords = new Set(data.usedWords || []);
     room.chat = data.chat || [];
+    room.chatRead = data.chatRead || {};
     room.pastGames = data.pastGames || [];
     const Module = GAME_MODULES[room.gameType];
     room.game = (data.game && Module) ? Module.fromData(data.game, room.players, room.teamOrder, room.usedWords) : null;
