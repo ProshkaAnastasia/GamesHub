@@ -53,6 +53,23 @@ class Room {
     return player;
   }
 
+  // вход в уже идущую партию (status !== 'lobby') — отдельный путь от
+  // addPlayer выше: по умолчанию зритель, но если это TTR и партия ещё
+  // позволяет добавить живого игрока (не финальный круг, есть свободное
+  // место) — TicketToRideGame.addPlayer сам раздаст стартовую руку/билеты
+  // "с колёс", и роль станет 'player'. Декодер такого метода не имеет —
+  // там подключение всегда зрителем (см. CLAUDE.md/план про причины)
+  joinInProgress(id, name) {
+    const player = { id, name: name.slice(0, 20), team: null, connected: true, role: 'spectator' };
+    this.players.set(id, player);
+    if (!this.hostId) this.hostId = id;
+    if (this.gameType === 'ttr' && this.game && typeof this.game.addPlayer === 'function') {
+      const res = this.game.addPlayer(id);
+      if (res.ok) player.role = 'player';
+    }
+    return player;
+  }
+
   removePlayer(id) {
     const player = this.players.get(id);
     if (!player) return;
@@ -251,6 +268,7 @@ class Room {
     const me = this.players.get(playerId);
     const playersList = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, team: p.team, connected: p.connected, isHost: p.id === this.hostId,
+      role: p.role || 'player',
     }));
 
     const base = {
@@ -263,7 +281,7 @@ class Room {
       pastGames: this.pastGames,
       players: playersList,
       hostId: this.hostId,
-      me: me ? { id: me.id, name: me.name, team: me.team, isHost: me.id === this.hostId } : null,
+      me: me ? { id: me.id, name: me.name, team: me.team, isHost: me.id === this.hostId, role: me.role || 'player' } : null,
       canStart: this.status === 'lobby' ? this.canStart() : false,
       canLeaveSafely: this.canPlayerLeaveSafely(playerId),
     };

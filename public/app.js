@@ -445,6 +445,7 @@
     $('#roster-row').innerHTML = view.players.map(p => `
       <span class="roster-chip team-${(p.team || '').toLowerCase()} ${p.connected ? '' : 'offline'}">
         <span class="dot"></span>${escapeHtml(p.name)}${p.connected ? '' : ' (офлайн)'}
+        ${p.role === 'spectator' ? '<span class="player-tag-spectator">зритель</span>' : ''}
       </span>
     `).join('');
   }
@@ -462,7 +463,7 @@
 
     const tv = view.teamView;
     if (!tv) {
-      $('#word-slots').innerHTML = '<div class="hint-text">Вы не участвуете в текущей игре.</div>';
+      $('#word-slots').innerHTML = '<div class="hint-text">👁 Вы наблюдаете за игрой.</div>';
       stopClueTimer();
       updatePauseBanner(null, null);
       return;
@@ -1566,16 +1567,26 @@
       `;
     }).join('');
 
+    // зрители не входят в ttrPlayers (это отдельный, чисто игровой список,
+    // см. TicketToRideGame.viewFor) — берём их из общего room-level списка
+    const spectators = roomPlayers.filter(p => p.role === 'spectator');
+    const spectatorsRow = $('#ttr-spectators-row');
+    spectatorsRow.hidden = !spectators.length;
+    if (spectators.length) spectatorsRow.textContent = `👁 Зрители: ${spectators.map(p => p.name).join(', ')}`;
+
     const turnPlayer = players.find(p => p.id === view.currentPlayerId);
     const indicator = $('#ttr-turn-indicator');
+    // сам я — зритель (не в ttrPlayers вообще) — отдельная приписка спереди,
+    // остальной текст (чей сейчас ход) остаётся как есть, он всем полезен
+    const spectatorPrefix = view.me?.role === 'spectator' ? '👁 Вы наблюдаете · ' : '';
     if (view.pendingTunnel) {
-      indicator.textContent = (view.pendingTunnel.playerId === view.me?.id) ? 'Решите судьбу туннеля' : 'Соперник решает судьбу туннеля';
+      indicator.textContent = spectatorPrefix + ((view.pendingTunnel.playerId === view.me?.id) ? 'Решите судьбу туннеля' : 'Соперник решает судьбу туннеля');
     } else if (view.myPendingTickets) {
-      indicator.textContent = 'Выберите билеты';
+      indicator.textContent = spectatorPrefix + 'Выберите билеты';
     } else if (turnPlayer) {
-      indicator.textContent = (turnPlayer.id === view.me?.id) ? 'Ваш ход' : `Ход: ${turnPlayer.name}`;
+      indicator.textContent = spectatorPrefix + ((turnPlayer.id === view.me?.id) ? 'Ваш ход' : `Ход: ${turnPlayer.name}`);
     } else {
-      indicator.textContent = '';
+      indicator.textContent = spectatorPrefix;
     }
   }
 

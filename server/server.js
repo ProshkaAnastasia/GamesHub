@@ -94,13 +94,17 @@ io.on('connection', (socket) => {
   socket.on('join-room', ({ name, roomCode, clientId }, cb) => {
     const room = manager.get(roomCode);
     if (!room) return cb?.({ error: 'Комната не найдена' });
-    if (room.status !== 'lobby') return cb?.({ error: 'Игра уже началась' });
     if (room.players.size >= 8) return cb?.({ error: 'Комната заполнена' });
     const playerId = clientId || socket.id;
-    room.addPlayer(playerId, (name || 'Игрок').trim() || 'Игрок');
+    const trimmedName = (name || 'Игрок').trim() || 'Игрок';
+    // партия уже идёт — подключаем зрителем, а если это TTR и она ещё
+    // позволяет добавить живого игрока (см. Room.joinInProgress) — игроком
+    const player = room.status === 'lobby'
+      ? room.addPlayer(playerId, trimmedName)
+      : room.joinInProgress(playerId, trimmedName);
     socket.join(room.code);
     sessions.set(socket.id, { roomCode: room.code, playerId });
-    cb?.({ ok: true, roomCode: room.code });
+    cb?.({ ok: true, roomCode: room.code, role: player.role || 'player' });
     broadcastRoom(room);
   });
 

@@ -51,6 +51,13 @@ class TicketToRideGame {
     this.ownedRoutes = {}; // playerId -> Set<routeId>
     this.routeOwner = {}; // routeId -> playerId (обратный индекс для быстрой проверки занятости)
     this.pendingInitialTickets = {}; // playerId -> [ticket,...] пока не подтвердил выбор
+    // playerId'ы, чья текущая запись в pendingInitialTickets — именно
+    // СТАРТОВАЯ раздача (минимум 2 билета, подтверждение не тратит ход), а
+    // не обычный добор в свой ход (минимум 1, подтверждение = конец хода).
+    // В момент старта партии это все playerIds разом (см. ниже), а дальше —
+    // только те, кто присоединился к уже идущей игре (см. addPlayer): для
+    // них this.phase уже 'playing', глобальный признак фазы не подходит
+    this.initialDealPending = new Set();
     this.keptTickets = {}; // playerId -> [ticket,...]
     this.stationsLeft = {}; // playerId -> number, стартуют с STATIONS_PER_PLAYER
     // playerId -> Set<routeId> — ЧУЖИЕ маршруты, разблокированные станциями
@@ -101,6 +108,7 @@ class TicketToRideGame {
       const initial = this.longTicketDeck.length ? [this.longTicketDeck.shift()] : [];
       initial.push(...this.ticketDeck.splice(0, 3 - initial.length));
       this.pendingInitialTickets[id] = rules.shuffle(initial);
+      this.initialDealPending.add(id);
     });
   }
 
@@ -125,6 +133,7 @@ class TicketToRideGame {
     Object.entries(data.stationLinks || {}).forEach(([pid, arr]) => {
       game.stationLinks[pid] = new Set(arr);
     });
+    game.initialDealPending = new Set(data.initialDealPending || []);
     return game;
   }
 
@@ -145,6 +154,7 @@ class TicketToRideGame {
       ),
       routeOwner: this.routeOwner,
       pendingInitialTickets: this.pendingInitialTickets,
+      initialDealPending: [...this.initialDealPending],
       keptTickets: this.keptTickets,
       deck: this.deck,
       discard: this.discard,
@@ -435,8 +445,12 @@ class TicketToRideGame {
     const pending = this.pendingInitialTickets[playerId];
     if (!pending) return { error: 'Сейчас нечего выбирать' };
 
-    const isInitialPhase = this.phase === 'initial-tickets';
-    const minKeep = isInitialPhase ? 2 : 1;
+    // стартовая раздача (минимум 2, ход не тратится) — либо это общая фаза
+    // 'initial-tickets' в начале партии, либо личная стартовая раздача
+    // игрока, подключившегося к уже идущей игре (см. addPlayer) —
+    // ГЛОБАЛЬНАЯ this.phase у него уже 'playing', одной проверки фазы мало
+    const isInitialDeal = this.phase === 'initial-tickets' || this.initialDealPending.has(playerId);
+    const minKeep = isInitialDeal ? 2 : 1;
     const indices = [...new Set(keepIndices || [])].filter((i) => i >= 0 && i < pending.length);
     if (indices.length < minKeep) return { error: `Нужно оставить минимум ${minKeep}` };
 
@@ -448,18 +462,69 @@ class TicketToRideGame {
 
     this.keptTickets[playerId] = [...(this.keptTickets[playerId] || []), ...kept];
     delete this.pendingInitialTickets[playerId];
+    this.initialDealPending.delete(playerId);
 
-    if (isInitialPhase) {
-      const stillWaiting = this.playerIds.some((id) => this.pendingInitialTickets[id]);
-      if (!stillWaiting) {
-        this.phase = 'playing';
-        this.currentPlayerIndex = 0;
+    if (isInitialDeal) {
+      // общий переход lobby-старта из 'initial-tickets' в 'playing' —
+      // только когда это ДЕЙСТВИТЕЛЬНО общая стартовая фаза, а не личная
+      // раздача опоздавшего игрока посреди уже идущей партии
+      if (this.phase === 'initial-tickets') {
+        const stillWaiting = this.playerIds.some((id) => this.pendingInitialTickets[id]);
+        if (!stillWaiting) {
+          this.phase = 'playing';
+          this.currentPlayerIndex = 0;
+        }
       }
+      // опоздавший игрок хода ни у кого не отнимает — просто дождётся своей
+      // естественной очереди (advanceTurn его не касается)
       return { ok: true };
     }
 
     // обычный ход — взятие билетов было единственным действием за ход
     this.advanceTurn();
+    return { ok: true };
+  }
+
+  // подключение живого игрока посреди уже идущей партии (см.
+  // Room.joinInProgress в server/game.js) — только пока фаза 'playing'
+  // (не 'initial-tickets' — до старта игроков добирают лобби-путём через
+  // Room.addPlayer; не 'final-round'/'finished' — усложнило бы очередь
+  // последних ходов больше, чем того стоит) и пока есть свободное место.
+  // Раздача — тот же код, что в конструкторе для каждого id при старте
+  // партии (строки выше), просто для одного нового id вместо forEach
+  addPlayer(playerId) {
+    if (this.phase !== 'playing') return { error: 'Сейчас нельзя присоединиться игроком' };
+    if (this.playerIds.length >= MAX_PLAYERS) return { error: 'Мест не осталось' };
+    if (this.playerIds.includes(playerId)) return { error: 'Уже в игре' };
+
+    const usedColors = new Set(Object.values(this.playerColor));
+    const color = PLAYER_COLORS.find((c) => !usedColors.has(c));
+    if (!color) return { error: 'Не осталось свободных цветов' };
+    this.playerColor[playerId] = color;
+
+    this.hands[playerId] = emptyHand();
+    this.trainsLeft[playerId] = rules.TRAINS_PER_PLAYER;
+    this.score[playerId] = 0;
+    this.scoreLog[playerId] = [];
+    this.ownedRoutes[playerId] = new Set();
+    this.stationsLeft[playerId] = STATIONS_PER_PLAYER;
+    this.stationLinks[playerId] = new Set();
+
+    for (let i = 0; i < rules.HAND_SIZE_INITIAL; i++) {
+      if (!this.deck.length) this.reshuffleDiscardIntoDeck();
+      if (!this.deck.length) break; // карт нигде больше нет — редкий случай, начинает с чем есть
+      addToHand(this.hands[playerId], this.deck.pop());
+    }
+
+    // та же гарантия "1 длинный в стартовой тройке", что и при старте партии
+    const initial = this.longTicketDeck.length ? [this.longTicketDeck.shift()] : [];
+    initial.push(...this.ticketDeck.splice(0, 3 - initial.length));
+    this.pendingInitialTickets[playerId] = rules.shuffle(initial);
+    this.initialDealPending.add(playerId);
+
+    // в конец очереди хода — не сдвигает currentPlayerIndex остальных,
+    // получит ход в свою естественную очередь
+    this.playerIds.push(playerId);
     return { ok: true };
   }
 
@@ -539,7 +604,7 @@ class TicketToRideGame {
       myHand: this.hands[playerId],
       myTickets,
       myPendingTickets: this.pendingInitialTickets[playerId] || null,
-      myPendingTicketsMinKeep: this.phase === 'initial-tickets' ? 2 : 1,
+      myPendingTicketsMinKeep: (this.phase === 'initial-tickets' || this.initialDealPending.has(playerId)) ? 2 : 1,
       pendingTunnel: (this.pendingTunnel && this.pendingTunnel.playerId === playerId) ? this.pendingTunnel : null,
     };
   }
