@@ -1392,6 +1392,15 @@
         const routesById = {};
         mapData.routes.forEach(r => { routesById[r.id] = r; });
         ttrAssets = { citiesById, routesById, trainColors: mapData.trainColors, svgText };
+      }).catch((err) => {
+        // не запоминаем неудачную попытку как окончательную — иначе при
+        // следующем вызове (следующий room-update) отдавался бы тот же
+        // самый уже отклонённый promise, и карта не загрузилась бы больше
+        // никогда за всё время открытой вкладки, даже если сеть на
+        // мгновение моргнула и уже восстановилась (это и было причиной
+        // "иногда карта просто вечно висит на загрузке")
+        ttrAssetsPromise = null;
+        throw err;
       });
     }
     return ttrAssetsPromise;
@@ -1546,6 +1555,12 @@
       renderTtrTicketPicker(view);
       renderTtrPaymentPanel(view);
       renderTtrTunnelPanel(view);
+    }).catch((err) => {
+      console.error('Не удалось загрузить карту TTR, повтор через 2с', err);
+      if (state.lastView !== view) return;
+      const container = $('#ttr-map-container');
+      if (container) container.innerHTML = '<p class="hint-text">Не удалось загрузить карту, повторная попытка…</p>';
+      setTimeout(() => { if (state.lastView === view) renderTtrGame(view, freshStart); }, 2000);
     });
   }
 
@@ -2555,7 +2570,6 @@
 
   // ---------- ЧАТ ----------
   let chatUnread = 0;
-  let lastRenderedChatLen = 0;
   let chatReplyTo = null; // { id, name, text } — на какое сообщение сейчас отвечаем
   let chatEditingId = null; // id сообщения, которое сейчас редактируем (или null)
   let lastMarkedChatReadId = null; // id последнего сообщения, за которое уже отправили mark-chat-read
@@ -2572,6 +2586,14 @@
   function chatTimeLabel(ts) {
     return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   }
+
+  // галочки статуса прочтения — SVG, а не символы "✓✓": текстовые галочки
+  // в разных шрифтах рисуются с разным расстоянием между собой, приходилось
+  // сжимать их отрицательным letter-spacing, и всё равно не похоже на
+  // привычный вид "перекрывающихся" галочек из мессенджеров. currentColor —
+  // берёт цвет из .chat-msg-receipt/.read в CSS, отдельно красить не нужно
+  const CHAT_CHECK_SINGLE_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5L6 12.5L14 3.5"/></svg>';
+  const CHAT_CHECK_DOUBLE_SVG = '<svg viewBox="0 0 20 16" width="18" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8.5L5 12.5L13 3.5"/><path d="M7 8.5L11 12.5L19 3.5"/></svg>';
 
   function updateChatBadge() {
     const badge = $('#chat-unread-badge');
@@ -2603,27 +2625,37 @@
     const list = $('#chat-messages');
     const wasAtBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 20;
 
-    // подряд идущие сообщения одного автора (в пределах 5 минут) —
-    // показываем имя только у первого в группе
+    // подряд идущие сообщения одного автора — показываем имя только у
+    // первого в группе (без ограничения по времени: раньше группировка
+    // сбрасывалась через 5 минут тишины, из-за чего один и тот же автор
+    // иногда получал повторную подпись с именем без смены отправителя —
+    // группировка должна ломаться только реальной сменой автора)
     let lastPlayerId = null;
-    let lastTs = 0;
     list.innerHTML = chat.map((m) => {
       const mine = m.playerId === clientId;
-      const grouped = m.playerId === lastPlayerId && (m.ts - lastTs) < 5 * 60 * 1000;
+      const grouped = m.playerId === lastPlayerId;
       lastPlayerId = m.playerId;
-      lastTs = m.ts;
       const replyHtml = m.replyTo
         ? `<div class="chat-reply-quote"><b>${escapeHtml(m.replyTo.name)}</b>: ${escapeHtml(m.replyTo.text)}</div>`
         : '';
-      const editedHtml = m.edited ? '<span class="chat-msg-edited">изменено</span>' : '';
-      // галочки и карандаш — только на своих сообщениях; статус прочтения
-      // чужих сообщений себе не нужен, редактировать чужое нельзя
+      const editedHtml = m.edited ? '<span class="chat-msg-edited">изм.</span>' : '';
+      // галочки статуса прочтения — только на своих сообщениях (чужой
+      // статус прочтения себе не нужен), теперь в том же блоке, что и
+      // время, а не отдельной строкой под пузырём
       const receiptHtml = mine
-        ? `<span class="chat-msg-receipt ${chatReadByOthers(view, m) ? 'read' : ''}" title="Кто прочитал">${chatReadByOthers(view, m) ? '✓✓' : '✓'}</span>`
+        ? `<span class="chat-msg-receipt ${chatReadByOthers(view, m) ? 'read' : ''}" title="Кто прочитал">${chatReadByOthers(view, m) ? CHAT_CHECK_DOUBLE_SVG : CHAT_CHECK_SINGLE_SVG}</span>`
         : '';
       const editBtnHtml = mine
         ? '<button type="button" class="chat-msg-edit-btn" title="Редактировать">✎</button>'
         : '';
+      // время (+ "изм." + галочки) — float:right внутри пузыря, а не
+      // JS-измерения: если на последней строке текста есть место, само
+      // подтягивается туда; если нет — само уходит на новую строку и всё
+      // равно остаётся справа. Раньше это считалось вручную через
+      // getBoundingClientRect, потому что время был ТОГО ЖЕ размера, что
+      // и текст, и пиксель-в-пиксель выравнивание было хрупким между
+      // браузерами; теперь время сознательно мельче (0.75em, см. CSS),
+      // и обычный float даёт нужное поведение без единой строчки JS
       return `
         <div class="chat-msg ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}" style="--chat-color:${chatColorFor(m.playerId)}" data-id="${m.id}">
           ${!grouped ? `<span class="chat-msg-name">${escapeHtml(m.name)}</span>` : ''}
@@ -2632,22 +2664,21 @@
             ${editBtnHtml}
             ${replyHtml}
             <span class="chat-msg-text">${escapeHtml(m.text)}</span>
-            <span class="chat-msg-time">${chatTimeLabel(m.ts)}${editedHtml}</span>
+            <span class="chat-msg-time">${chatTimeLabel(m.ts)}${editedHtml}${receiptHtml}</span>
           </div>
-          ${receiptHtml}
         </div>
       `;
     }).join('') || '<p class="hint-text">Пока никто ничего не написал</p>';
 
-    if (chat.length > lastRenderedChatLen) {
-      const newMessages = chat.slice(lastRenderedChatLen);
-      const incomingCount = newMessages.filter(m => m.playerId !== clientId).length;
-      if (incomingCount && !state.chatOpen) {
-        chatUnread += incomingCount;
-        updateChatBadge();
-      }
+    // считаем от серверной метки chatRead[clientId] (переживает перезагрузку
+    // страницы), а не от локального счётчика "сколько сообщений уже
+    // отрендерили" — тот обнулялся при каждой перезагрузке модуля и на
+    // первом рендере принимал всю историю чата за "новые" сообщения
+    if (!state.chatOpen) {
+      const myReadTs = view.chatRead?.[clientId] || 0;
+      chatUnread = chat.filter(m => m.playerId !== clientId && m.ts > myReadTs).length;
+      updateChatBadge();
     }
-    lastRenderedChatLen = chat.length;
 
     if (state.chatOpen || wasAtBottom) {
       list.scrollTop = list.scrollHeight;
