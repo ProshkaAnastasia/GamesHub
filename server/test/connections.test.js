@@ -21,7 +21,7 @@ function update(socket, predicate = () => true) {
 test('real connections enforce identity, invites, origin, validation and multiple tabs', { timeout: 20000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gameshub-security-'));
   const child = spawn(process.execPath, [path.join(__dirname, '../server.js')], {
-    env: { ...process.env, PORT: '0', DATA_DIR: dir, ALLOWED_ORIGINS: origin, EVENTS_PER_MINUTE: '100', PUBLIC_ROOM_LIST: 'false', REQUIRE_INVITE: 'true' },
+    env: { ...process.env, PORT: '0', DATA_DIR: dir, ALLOWED_ORIGINS: origin, EVENTS_PER_MINUTE: '100', PUBLIC_ROOM_LIST: 'false', MATCH_START_DELAY_MS: '350', DISCONNECT_GRACE_MS: '250' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const sockets = [];
@@ -92,6 +92,59 @@ test('real connections enforce identity, invites, origin, validation and multipl
   const detached = update(secondTab, v => !v.players.some(p => p.id === guestAuth.playerId));
   assert.ok((await request(guest, 'create-room', { name: 'Other room' })).ok);
   await detached;
+  // Public queues never expose or use private invitations and have no host.
+  const thirdAuth = await session();
+  const third = await connect(thirdAuth);
+  const firstPublic = update(secondTab, v => v.visibility === 'public');
+  assert.ok((await request(secondTab, 'find-game', { name: 'Host', gameType: 'decoder' })).ok);
+  const publicView = await firstPublic;
+  assert.equal(publicView.hostId, null);
+  assert.equal(publicView.gameType, 'decoder');
+  assert.equal(publicView.inviteToken, null);
+  assert.notEqual(publicView.code, view.code);
+  assert.ok((await request(secondTab, 'start-game')).error);
+  assert.ok((await request(secondTab, 'set-game-type', { gameType: 'ttr' })).error);
+  assert.ok((await request(third, 'join-room', { name: 'Third', roomCode: publicView.code })).error);
+  assert.ok((await request(guest, 'find-game', { name: 'Guest', gameType: 'decoder' })).ok);
+  const countdown = update(secondTab, v => !!v.startDeadline);
+  assert.ok((await request(third, 'find-game', { name: 'Third', gameType: 'decoder' })).ok);
+  assert.equal((await countdown).players.length, 3);
+  const cancelled = update(secondTab, v => v.startDeadline === null && v.players.length === 2);
+  assert.ok((await request(third, 'leave-room')).ok);
+  await cancelled;
+  const playing = update(secondTab, v => v.status === 'playing');
+  assert.ok((await request(third, 'find-game', { name: 'Third', gameType: 'decoder' })).ok);
+  const playingView = await playing;
+  assert.equal(playingView.players.length, 3);
+  assert.ok(playingView.sharedPlayerId);
+  // Disconnect has no automatic expiry; authenticated players can resume or finish manually.
+  third.disconnect();
+  const returned = await connect(thirdAuth);
+  assert.ok((await request(returned, 'rejoin-room', { roomCode: publicView.code })).ok);
+  const active = update(secondTab, v => v.status === 'playing' && v.chat.some(m => m.text === 'returned'));
+  await request(returned, 'send-chat', { text: 'returned' });
+  await active;
+  const offline = update(secondTab, v => v.canForceEnd && v.status === 'playing');
+  returned.disconnect();
+  await offline;
+  // Even the old grace interval must no longer end the game.
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const returnRooms = await request(secondTab, 'my-rooms');
+  assert.equal(returnRooms.rooms.find(r => r.code === publicView.code).status, 'playing');
+  const again = await connect(thirdAuth);
+  const ownRooms = await request(again, 'my-rooms');
+  assert.ok(ownRooms.rooms.some(r => r.code === publicView.code));
+  assert.ok((await request(again, 'rejoin-room', { roomCode: publicView.code })).ok);
+  assert.ok((await request(secondTab, 'force-end-game')).error);
+  const canFinish = update(secondTab, v => v.canForceEnd);
+  again.disconnect();
+  await canFinish;
+  const ended = update(secondTab, v => v.status === 'finished');
+  assert.ok((await request(secondTab, 'force-end-game')).ok);
+  assert.match((await ended).winReason, /завершена игроком/);
+  const nextQueue = update(secondTab, v => v.visibility === 'public' && v.status === 'lobby');
+  assert.ok((await request(secondTab, 'find-game', { name: 'Host', gameType: 'decoder' })).ok);
+  assert.notEqual((await nextQueue).code, publicView.code);
   let limited = false;
   for (let i = 0; i < 110; i++) {
     const result = await request(secondTab, 'list-rooms');

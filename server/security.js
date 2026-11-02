@@ -12,7 +12,8 @@ function readConfig(env = process.env) {
   if (origins.some(origin => !/^https?:\/\//.test(origin))) throw new Error('ALLOWED_ORIGINS must contain HTTP(S) origins');
   return {
     origins, secureCookie: env.COOKIE_SECURE === 'true',
-    publicRooms: env.PUBLIC_ROOM_LIST === 'true', requireInvite: env.REQUIRE_INVITE !== 'false',
+    publicRooms: env.PUBLIC_ROOM_LIST === 'true',
+    matchStartDelayMs: positiveInt(env.MATCH_START_DELAY_MS, 15000),
     maxRooms: positiveInt(env.MAX_ROOMS, 500),
     maxConnections: positiveInt(env.MAX_CONNECTIONS, 200),
     eventsPerMinute: positiveInt(env.EVENTS_PER_MINUTE, 180),
@@ -20,6 +21,13 @@ function readConfig(env = process.env) {
     createsPerHour: positiveInt(env.CREATES_PER_HOUR, 10),
     connectionsPerMinute: positiveInt(env.CONNECTIONS_PER_MINUTE, 120),
   };
+}
+function allowedSocketOrigin(req, origins) {
+  if (req.headers.origin) return origins.includes(req.headers.origin);
+  // Same-origin polling GETs may omit Origin. Fetch Metadata plus Host
+  // distinguishes these browser requests from cross-site requests.
+  return req.headers['sec-fetch-site'] === 'same-origin'
+    && origins.some(origin => new URL(origin).host === req.headers.host);
 }
 function loadSecret(dir) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -69,11 +77,12 @@ const str = (v, n = 100) => typeof v === 'string' && v.length <= n;
 const code = v => typeof v === 'string' && /^[A-Z2-9]{4}$/i.test(v);
 const words = (v, n, length) => Array.isArray(v) && v.length === n && v.every(w => str(w, length));
 const payment = v => obj(v) && Object.entries(v).every(([k, n]) => ['pink', 'white', 'blue', 'yellow', 'orange', 'black', 'red', 'green', 'locomotive'].includes(k) && Number.isInteger(n) && n >= 0 && n <= 110);
-const emptyEvents = new Set(['list-rooms', 'start-game', 'lock-tiebreak-guess', 'draw-tickets', 'force-end-game', 'play-again', 'mark-chat-read', 'leave-room']);
+const emptyEvents = new Set(['my-rooms', 'list-rooms', 'start-game', 'lock-tiebreak-guess', 'draw-tickets', 'force-end-game', 'play-again', 'mark-chat-read', 'leave-room']);
 function validPayload(event, p) {
   if (!obj(p)) return false;
   if (emptyEvents.has(event)) return true;
   switch (event) {
+    case 'find-game': return str(p.name, 80) && ['decoder', 'ttr'].includes(p.gameType);
     case 'create-room': return str(p.name, 80);
     case 'join-room': return str(p.name, 80) && code(p.roomCode) && (p.invite === undefined || str(p.invite, 100));
     case 'rejoin-room': return code(p.roomCode);
@@ -92,4 +101,4 @@ function validPayload(event, p) {
     default: return false;
   }
 }
-module.exports = { readConfig, loadSecret, createIdentity, createLimiter, validPayload };
+module.exports = { allowedSocketOrigin, readConfig, loadSecret, createIdentity, createLimiter, validPayload };

@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createIdentity, createLimiter, validPayload, readConfig, loadSecret } = require('../security');
+const { createIdentity, createLimiter, validPayload, readConfig, loadSecret, allowedSocketOrigin } = require('../security');
 
 test('signed identity cannot be forged using a public player ID', () => {
   const identity = createIdentity(crypto.randomBytes(32));
@@ -18,6 +18,7 @@ test('signed identity cannot be forged using a public player ID', () => {
 
 test('all socket events reject malformed payloads', () => {
   const cases = {
+    'find-game': { name: 'Имя', gameType: 'decoder' },
     'create-room': { name: 'Имя' }, 'join-room': { name: 'Имя', roomCode: 'AB23' },
     'rejoin-room': { roomCode: 'AB23' }, 'choose-team': { team: 'A' },
     'set-game-type': { gameType: 'decoder' }, 'submit-clues': { clues: ['a', 'b', 'c'] },
@@ -27,7 +28,7 @@ test('all socket events reject malformed payloads', () => {
     'build-station': { routeId: 'route', payment: { blue: 1 } },
     'resolve-tunnel': { decision: null }, 'choose-tickets': { keepIndices: [0] },
     'send-chat': { text: 'hi' }, 'edit-chat': { id: 'msg', text: 'hi' },
-    'start-game': {}, 'list-rooms': {}, 'lock-tiebreak-guess': {}, 'draw-tickets': {},
+    'my-rooms': {}, 'start-game': {}, 'list-rooms': {}, 'lock-tiebreak-guess': {}, 'draw-tickets': {},
     'force-end-game': {}, 'play-again': {}, 'mark-chat-read': {}, 'leave-room': {},
   };
   for (const [event, payload] of Object.entries(cases)) {
@@ -48,7 +49,7 @@ test('limiter caps requests and memory; defaults are private', () => {
   assert.equal(allow('one', 2, 60000), false);
   assert.equal(allow('two', 2, 60000), false);
   const config = readConfig({});
-  assert.equal(config.requireInvite, true);
+  assert.equal(config.matchStartDelayMs, 15000);
   assert.equal(config.publicRooms, false);
   assert.throws(() => readConfig({ EVENTS_PER_MINUTE: '-1' }));
   assert.throws(() => readConfig({ ALLOWED_ORIGINS: '*' }));
@@ -62,4 +63,14 @@ test('session signing key survives restart without exposing it in room state', (
     assert.equal(createIdentity(loadSecret(dir)).verify(`gameshub_session=${session.token}`), session.id);
     assert.equal(fs.statSync(path.join(dir, 'session-key')).mode & 0o777, 0o600);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('same-origin polling without Origin is allowed; foreign origins and hosts are rejected', () => {
+  const origins = ['http://localhost:3000'];
+  const check = headers => allowedSocketOrigin({ headers }, origins);
+  assert.equal(check({ origin: origins[0] }), true);
+  assert.equal(check({ host: 'localhost:3000', 'sec-fetch-site': 'same-origin' }), true);
+  assert.equal(check({ host: 'evil.example', 'sec-fetch-site': 'same-origin' }), false);
+  assert.equal(check({ host: 'localhost:3000', 'sec-fetch-site': 'cross-site' }), false);
+  assert.equal(check({ origin: 'https://evil.example', host: 'localhost:3000', 'sec-fetch-site': 'same-origin' }), false);
 });

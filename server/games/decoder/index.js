@@ -590,7 +590,6 @@ class DecoderGame {
     const teamView = {
       myTeamKey: me.team,
       isSharedPlayer: playerId === this.sharedPlayerId,
-      sharedWords: playerId === this.sharedPlayerId ? { A: this.teams.A.words, B: this.teams.B.words } : null,
       myWords: myTeam.words,
       // слова соперника — секрет, пока игра не окончена; на финальном
       // экране прятать их больше не от кого
@@ -645,6 +644,8 @@ class DecoderGame {
 }
 
 module.exports = {
+  minPlayers: 3,
+  maxPlayers: 8,
   id: 'decoder',
   label: 'Декодер',
   teamKeys: TEAMS,

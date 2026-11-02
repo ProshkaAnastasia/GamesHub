@@ -184,7 +184,7 @@ input[type="text"]:focus {
 /* ---------- Экран входа ---------- */
 
 .landing-wrap {
-  max-width: 420px;
+  max-width: 520px;
   margin: 6vh auto 0;
 }
 .brand {
@@ -312,14 +312,15 @@ h1 {
 
 /* ---------- Игра ---------- */
 
-.game-topbar { max-width: 720px; }
+.game-topbar { max-width: 720px; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.game-topbar > .btn-icon { flex: 0 0 38px; }
 /* у декодера в хедере первым элементом идёт .scoreboard с flex:1, он сам
    отжимает кнопки-иконки вправо — у TTR ростер игроков переехал под карту
    (см. index.html), в хедере остались только сами иконки, без него
    justify-content: space-between растащил бы их по всей ширине хедера */
 /* justify-content: flex-end сам по себе не разводит соседние кнопки —
    без ростера между ними в потоке больше ничего нет, вплотную друг к другу */
-#screen-game-ttr .game-topbar { justify-content: flex-end; gap: 10px; }
+#screen-game-ttr .game-topbar { justify-content: flex-end; }
 .scoreboard {
   display: flex;
   align-items: center;
@@ -979,7 +980,8 @@ h1 {
 
 .finished-wrap { max-width: 420px; margin: 6vh auto 0; text-align: center; }
 .finished-wrap h2 { font-family: var(--font-display); font-size: 24px; margin: 0 0 10px; }
-.finished-wrap #btn-toggle-history-finished { margin-bottom: 14px; }
+.finished-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.finished-actions > .btn { margin: 0; min-width: 0; }
 
 .finished-report {
   max-width: 460px;
@@ -1562,4 +1564,56 @@ h1 {
      ширину, билет занимает его целиком */
   .ttr-tickets, .ttr-ticket-picker-list { grid-template-columns: 1fr; }
   .ttr-ticket-card { grid-column: span 1; }
+}
+
+/* Native radio controls styled to match the lobby game picker. */
+.landing-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; min-width: 0; }
+.landing-actions > * { min-width: 0; max-width: 100%; }
+.landing-actions > .field, .landing-actions > .hint-text { margin: 0; }
+.landing-actions > .divider { margin: -12px 0; }
+.landing-actions .hint-text { line-height: 1.5; white-space: normal; overflow-wrap: break-word; text-wrap: balance; }
+.hint-line { display: block; }
+#invitation-entry:not([hidden]) { display: grid; gap: 14px; }
+#invitation-entry > .field { margin: 0; }
+.match-game-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.match-game-option { display: block; position: relative; min-width: 0; cursor: pointer; }
+.match-game-option input {
+  position: absolute; width: 1px; height: 1px; opacity: 0;
+}
+.match-game-option span {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 10px 12px;
+  font-family: var(--font-body); font-size: 14px; font-weight: 600;
+  line-height: 1.4; text-align: center; overflow-wrap: anywhere;
+  color: var(--text-muted); background: var(--panel-raised);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.match-game-option:hover span { border-color: var(--accent-dim); color: var(--text); }
+.match-game-option input:checked + span {
+  border-color: var(--accent-dim); color: var(--accent);
+  background: rgba(124, 227, 139, .08);
+}
+.match-game-option input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.resume-room { margin-bottom: 10px; }
+.offline-actions { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+
+@media (max-width: 360px) {
+  .match-game-picker { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* More space around the landing form and between its action groups. */
+.landing-wrap .panel { padding: 32px; }
+.landing-wrap .panel > .field { margin-bottom: 32px; }
+.landing-actions .field-label { margin-bottom: 12px; }
+@media (max-width: 560px) {
+  .landing-wrap .panel { padding: 24px; }
+  .match-game-picker { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 560px) {
+  #screen-game .scoreboard { flex-basis: 100%; min-width: 0; gap: 8px; }
+  #screen-game .score-pill { padding: 6px 8px; gap: 6px; }
+  #screen-game .round-indicator { white-space: nowrap; }
 }

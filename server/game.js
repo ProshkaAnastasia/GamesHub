@@ -15,8 +15,10 @@ function makeRoomCode() {
 }
 
 class Room {
-  constructor(code) {
+  constructor(code, visibility = 'private') {
     this.code = code;
+    this.visibility = visibility;
+    this.startDeadline = null;
     this.inviteToken = randomBytes(24).toString('hex');
     this.createdAt = Date.now();
     this.hostId = null;
@@ -51,7 +53,7 @@ class Room {
   addPlayer(id, name) {
     const player = { id, name: name.slice(0, 20), team: null, connected: true };
     this.players.set(id, player);
-    if (!this.hostId) this.hostId = id;
+    if (this.visibility === 'private' && !this.hostId) this.hostId = id;
     return player;
   }
 
@@ -64,7 +66,7 @@ class Room {
   joinInProgress(id, name) {
     const player = { id, name: name.slice(0, 20), team: null, connected: true, role: 'spectator' };
     this.players.set(id, player);
-    if (!this.hostId) this.hostId = id;
+    if (this.visibility === 'private' && !this.hostId) this.hostId = id;
     if (this.gameType === 'ttr' && this.game && typeof this.game.addPlayer === 'function') {
       const res = this.game.addPlayer(id);
       if (res.ok) player.role = 'player';
@@ -76,6 +78,10 @@ class Room {
     const player = this.players.get(id);
     if (!player) return;
     player.connected = false;
+    player.left = true;
+    if (this.status === 'playing' && player.role !== 'spectator') {
+      this.forceEndGame(`Игрок ${player.name} вышел — партия завершена. Можно найти новую игру.`);
+    }
     // если игра ещё в лобби — удаляем совсем
     if (this.status === 'lobby') {
       this.players.delete(id);
@@ -83,7 +89,7 @@ class Room {
         this.teamOrder[t] = (this.teamOrder[t] || []).filter(pid => pid !== id);
       });
     }
-    // хост, который не вернулся за grace-период, передаёт права следующему
+    // При осознанном выходе хост передаёт права следующему
     // онлайн-игроку — иначе комната зависла бы навсегда без возможности
     // нажать «начать игру» / «следующий раунд» / «играть ещё раз»
     if (this.hostId === id) {
@@ -167,6 +173,7 @@ class Room {
   }
 
   setGameType(playerId, gameType) {
+    if (this.visibility === 'public') return { error: 'Игра выбрана при подборе' };
     if (this.status !== 'lobby') return { error: 'Нельзя менять тип игры после старта' };
     if (this.hostId !== playerId) return { error: 'Только хост может менять тип игры' };
     if (!GAME_MODULES[gameType]) return { error: 'Неизвестный тип игры' };
@@ -186,30 +193,39 @@ class Room {
     return Module ? Module.canStart(this.teamOrder, this.players) : false;
   }
 
+  updateStartDeadline(now, delayMs) {
+    if (this.visibility !== 'public' || this.status !== 'lobby' || !this.canStart()) {
+      this.startDeadline = null;
+    } else if (this.startDeadline === null) {
+      this.startDeadline = now + delayMs;
+    }
+    return this.startDeadline;
+  }
+
   startGame() {
+    if (this.status !== 'lobby') return { error: 'Партия уже началась' };
     const Module = this.module;
     if (!Module) return { error: this.gameType ? 'Неизвестный тип игры' : 'Сначала выберите игру' };
     if (!Module.canStart(this.teamOrder, this.players)) {
       return { error: Module.startRequirementText || 'Недостаточно игроков для этого режима' };
     }
+    this.players.forEach(p => { p.role = p.connected ? 'player' : 'spectator'; });
     if (Module.assignTeams) this.teamOrder = Module.assignTeams(this.players);
     this.game = Module.create(this.players, this.teamOrder, this.usedWords);
+    this.startDeadline = null;
     this.status = 'playing';
     return { ok: true };
   }
 
-  // можно ли игроку выйти прямо сейчас, не ломая текущую партию — в лобби
-  // и по завершении игры всегда безопасно, во время игры решает сам
-  // игровой модуль (у него своя специфика: роли, фазы и т.д.)
-  canPlayerLeaveSafely(playerId) {
-    if (this.status !== 'playing' || !this.game) return { safe: true, reason: null };
-    return this.game.canPlayerLeaveSafely(playerId);
+  // Выход доступен всегда; окончательный уход участника завершает партию.
+  canPlayerLeaveSafely() {
+    return { safe: true, reason: null };
   }
 
   // тонкие делегаты в текущую партию — если игры нет (ещё не началась/уже
   // сброшена), явно сообщаем об ошибке вместо падения на undefined-методе
   _delegate(method, ...args) {
-    if (!this.game || typeof this.game[method] !== 'function') {
+    if (this.status !== 'playing' || !this.game || typeof this.game[method] !== 'function') {
       return { error: 'Недоступно сейчас' };
     }
     const res = this.game[method](...args);
@@ -240,11 +256,26 @@ class Room {
   // хост может в любой момент прервать текущую партию — работает одинаково
   // для любого типа игры, т.к. опирается только на общий контракт
   // (finished/winner/winReason), ничего не зная про конкретные правила
-  forceEndGame() {
+  canManagePrivate(playerId) {
+    const player = this.players.get(playerId);
+    return this.visibility === 'private' && !!player?.connected && !player.left
+      && (this.hostId === playerId || (!this.players.get(this.hostId)?.connected && player.role !== 'spectator'));
+  }
+
+  canForceEnd(playerId) {
+    const player = this.players.get(playerId);
+    if (this.status !== 'playing' || !player?.connected || player.left) return false;
+    if (this.visibility === 'private' && this.hostId === playerId) return true;
+    if (player.role === 'spectator') return false;
+    const offlineParticipant = [...this.players.values()].some(p => !p.connected && !p.left && p.role !== 'spectator');
+    return offlineParticipant && (this.visibility === 'public' || !this.players.get(this.hostId)?.connected);
+  }
+
+  forceEndGame(reason = 'Игра завершена хостом досрочно') {
     if (this.status !== 'playing' || !this.game) return { error: 'Сейчас нет активной игры' };
     this.game.finished = true;
     this.game.winner = 'draw'; // никто не выиграл — партию прервали, а не доиграли до конца
-    this.game.winReason = 'Игра завершена хостом досрочно';
+    this.game.winReason = reason;
     this.status = 'finished';
     return { ok: true };
   }
@@ -281,7 +312,9 @@ class Room {
 
     const base = {
       code: this.code,
-      inviteToken: this.inviteToken,
+      visibility: this.visibility,
+      startDeadline: this.startDeadline,
+      inviteToken: this.visibility === 'private' ? this.inviteToken : null,
       status: this.status,
       gameType: this.gameType,
       availableGameTypes: GAME_LIST,
@@ -292,6 +325,8 @@ class Room {
       hostId: this.hostId,
       me: me ? { id: me.id, name: me.name, team: me.team, isHost: me.id === this.hostId, role: me.role || 'player' } : null,
       canStart: this.status === 'lobby' ? this.canStart() : false,
+      canForceEnd: this.canForceEnd(playerId),
+      canRestart: this.status === 'finished' && this.canManagePrivate(playerId),
       canLeaveSafely: this.canPlayerLeaveSafely(playerId),
     };
 
@@ -304,7 +339,9 @@ class Room {
   toJSON() {
     return {
       code: this.code,
-      inviteToken: this.inviteToken,
+      visibility: this.visibility,
+      startDeadline: this.startDeadline,
+      inviteToken: this.visibility === 'private' ? this.inviteToken : null,
       createdAt: this.createdAt,
       hostId: this.hostId,
       players: [...this.players.values()],
@@ -321,7 +358,7 @@ class Room {
 
   // восстановление комнаты из сохранённых данных (после перезапуска сервера)
   static fromData(data) {
-    const room = new Room(data.code);
+    const room = new Room(data.code, data.visibility === 'public' ? 'public' : 'private');
     room.inviteToken = data.inviteToken || room.inviteToken;
     room.createdAt = data.createdAt;
     room.hostId = data.hostId;
@@ -357,12 +394,22 @@ class RoomManager {
     }
   }
 
-  createRoom() {
+  createRoom(visibility = 'private', gameType = null) {
     let code;
     do { code = makeRoomCode(); } while (this.rooms.has(code));
-    const room = new Room(code);
+    const room = new Room(code, visibility);
+    room.gameType = gameType;
     this.rooms.set(code, room);
     return room;
+  }
+
+  findPublicRoom(gameType) {
+    const module = GAME_MODULES[gameType];
+    if (!module) return null;
+    const waiting = [...this.rooms.values()].filter(room => room.visibility === 'public'
+      && room.status === 'lobby' && room.gameType === gameType
+      && [...room.players.values()].filter(p => p.connected).length < module.maxPlayers);
+    return waiting.length ? waiting[Math.floor(Math.random() * waiting.length)] : null;
   }
 
   get(code) {
@@ -378,6 +425,7 @@ class RoomManager {
   // было посмотреть на экране входа
   listSummaries() {
     return [...this.rooms.values()]
+      .filter(room => room.visibility === 'public' && room.status === 'lobby')
       .map(room => ({
         code: room.code,
         status: room.status,

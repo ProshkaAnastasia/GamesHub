@@ -1,6 +1,7 @@
 (() => {
   const socket = io({ autoConnect: false });
 
+  let lobbyCountdown = null;
   const state = {
     myId: null,
     lastView: null,
@@ -15,6 +16,7 @@
   const $all = (sel) => Array.from(document.querySelectorAll(sel));
 
   function showScreen(name) {
+    if (name !== 'lobby') { clearInterval(lobbyCountdown); lobbyCountdown = null; }
     $all('.screen').forEach(s => s.classList.remove('active'));
     $(`#screen-${name}`).classList.add('active');
   }
@@ -100,7 +102,9 @@
   let currentRoomCode = urlRoomCodeEarly ? urlRoomCodeEarly.toUpperCase() : null;
 
   socket.on('connect', () => {
+    ['btn-find-game', 'btn-create', 'btn-join'].forEach(id => { document.getElementById(id).disabled = false; });
     state.myId = socket.id;
+    refreshReturnRooms();
     if (currentRoomCode) {
       emit('rejoin-room', { roomCode: currentRoomCode, clientId }).then((res) => {
         if (res.error) {
@@ -119,6 +123,10 @@
         }
       });
     }
+  });
+
+  socket.on('disconnect', () => {
+    ['btn-find-game', 'btn-create', 'btn-join'].forEach(id => { document.getElementById(id).disabled = true; });
   });
 
   // ---------- ЭКРАН: вход ----------
@@ -189,39 +197,30 @@
     if (res.error) return showError(landingError, res.error);
   });
 
-  // ---------- список активных комнат (доступен только до входа в свою) ----------
-  const STATUS_LABELS = { lobby: 'лобби', playing: 'игра идёт', finished: 'завершена' };
-
-  function renderRoomsList(rooms) {
-    const list = $('#rooms-list');
-    if (!rooms.length) {
-      list.innerHTML = '<p class="hint-text">Комнат пока нет</p>';
-      return;
-    }
-    list.innerHTML = rooms.map(r => `
-      <button class="room-item" data-code="${r.code}">
-        <span class="room-item-code mono">${r.code}</span>
-        <span class="room-item-meta">${r.playerCount} игрок(ов)${r.hostName ? ' · хост ' + escapeHtml(r.hostName) : ''}${r.status === 'playing' ? ' · раунд ' + r.round : ''}</span>
-        <span class="room-item-status">${STATUS_LABELS[r.status] || r.status}</span>
-      </button>
+  async function refreshReturnRooms() {
+    const res = await emit('my-rooms');
+    const wrap = $('#resume-rooms');
+    const rooms = res.rooms || [];
+    wrap.hidden = rooms.length === 0;
+    wrap.innerHTML = rooms.map(room => `
+      <button class="btn btn-secondary resume-room" data-code="${escapeHtml(room.code)}">${room.status === 'finished' ? 'Посмотреть завершённую игру' : 'Вернуться в игру'} · ${room.gameType === 'ttr' ? 'Ticket to Ride' : room.gameType === 'decoder' ? 'Декодер' : 'Приватная комната'} · ${escapeHtml(room.code)}</button>
     `).join('');
-    $all('.room-item').forEach(btn => {
-      btn.addEventListener('click', () => {
-        roomCodeInput.value = btn.dataset.code;
-        $('#rooms-panel').hidden = true;
-        $('#btn-join').click();
-      });
-    });
+    wrap.querySelectorAll('.resume-room').forEach(button => button.addEventListener('click', async () => {
+      const result = await emit('rejoin-room', { roomCode: button.dataset.code });
+      if (result.error) { showError(landingError, result.error); refreshReturnRooms(); }
+    }));
   }
 
-  $('#btn-list-rooms').addEventListener('click', async () => {
-    const res = await emit('list-rooms', {});
-    renderRoomsList(res.rooms || []);
-    $('#rooms-panel').hidden = false;
-  });
-  $('#btn-close-rooms').addEventListener('click', () => {
-    $('#rooms-panel').hidden = true;
-  });
+  async function findGame(gameType) {
+    const name = resolveName();
+    nameInput.value = name;
+    try { localStorage.setItem('decoder_name', name); } catch (e) {}
+    const res = await emit('find-game', { name, gameType });
+    if (res.error) showError(landingError, res.error);
+    return res;
+  }
+  $('#btn-find-game').addEventListener('click', () => findGame($('#match-game-select input:checked')?.value));
+  $('#invitation-entry').hidden = !urlParams.get('invite') || !urlParams.get('room');
 
   // ---------- ЭКРАН: лобби ----------
   // navigator.clipboard требует secure context (https или localhost) — при
@@ -265,7 +264,7 @@
 
   async function leaveRoom() {
     if (state.lastView?.status === 'playing') {
-      if (!confirm('Выйти из комнаты? Игра продолжится без вас.')) return;
+      if (!confirm('Выйти из комнаты? Если вы участник партии, она завершится для всех.')) return;
     }
     const res = await emit('leave-room', {});
     if (res.error) return alert(res.error);
@@ -281,7 +280,9 @@
     $('#btn-toggle-games').hidden = true;
     $('#games-panel').hidden = true;
     showScreen('landing');
+    refreshReturnRooms();
   }
+  $('#btn-leave-finished').addEventListener('click', leaveRoom);
   $('#btn-leave-lobby').addEventListener('click', leaveRoom);
   $('#btn-leave-game').addEventListener('click', leaveRoom);
   $('#btn-leave-game-ttr').addEventListener('click', leaveRoom);
@@ -303,6 +304,7 @@
     const res = await emit('force-end-game', {});
     if (res.error) alert(res.error);
   }
+  $all('.btn-end-offline').forEach(button => button.addEventListener('click', forceEndGame));
   $('#btn-force-end-game').addEventListener('click', forceEndGame);
   $('#btn-force-end-game-ttr').addEventListener('click', forceEndGame);
 
@@ -329,7 +331,7 @@
   // появятся здесь сами, без изменений на клиенте
   function renderGameTypePicker(view) {
     const isHost = view.me?.isHost;
-    const types = view.availableGameTypes || [];
+    const types = (view.availableGameTypes || []).filter(t => view.visibility !== 'public' || t.id === view.gameType);
     $('#game-type-picker').innerHTML = types.map(t => `
       <button type="button" class="game-type-btn ${t.id === view.gameType ? 'active' : ''}" data-type="${t.id}" ${isHost ? '' : 'disabled'}>${escapeHtml(t.label)}</button>
     `).join('');
@@ -349,19 +351,22 @@
     renderGameTypePicker(view);
 
     const isHost = view.me?.isHost;
+    const isPublic = view.visibility === 'public';
+    $('#btn-copy-link').hidden = isPublic;
+    $('.lobby-hint').textContent = isPublic
+      ? 'Подбираем игроков. Старт начнётся автоматически после короткого отсчёта.'
+      : 'Отправьте друзьям ссылку-приглашение. По одному номеру войти нельзя.';
     const gameChosen = !!view.gameType;
     const pendingHint = $('#game-type-pending-hint');
     const currentModule = (view.availableGameTypes || []).find(t => t.id === view.gameType);
     const hasTeams = !!(currentModule?.teamKeys?.length) && !currentModule.autoAssignTeams;
-    $('#teams-section').hidden = !gameChosen;
+    $('#teams-section').hidden = false;
     pendingHint.hidden = gameChosen;
     if (!gameChosen) {
       pendingHint.textContent = isHost ? 'Выберите игру, чтобы продолжить' : 'Хост выбирает игру…';
       $('#btn-start-game').hidden = true;
-      $('#lobby-status').hidden = true;
-      return;
     }
-    $('#lobby-status').hidden = false;
+    $('#lobby-status').hidden = !gameChosen;
     // игры без команд (teamKeys: []), например Ticket to Ride — прячем
     // блок выбора А/Б, но список игроков всё равно нужен, поэтому
     // переиспользуем unassigned-list как общий ростер (team у всех так и
@@ -395,9 +400,21 @@
     $('#unassigned-wrap').hidden = hasTeams && byTeam.none.length === 0;
 
     const startBtn = $('#btn-start-game');
-    startBtn.hidden = !isHost;
+    startBtn.hidden = !isHost || !gameChosen;
     startBtn.disabled = !view.canStart;
-    $('#lobby-status').textContent = view.canStart
+    clearInterval(lobbyCountdown);
+    const lobbyStatus = $('#lobby-status');
+    if (isPublic) {
+      const tick = () => {
+        lobbyStatus.textContent = view.startDeadline
+          ? `Игра начнётся через ${Math.max(0, Math.ceil((view.startDeadline - Date.now()) / 1000))} сек.`
+          : `Ожидаем игроков… ${view.players.filter(p => p.connected).length} онлайн. ${currentModule?.startRequirementText || ''}`;
+      };
+      tick();
+      if (view.startDeadline) lobbyCountdown = setInterval(tick, 250);
+      return;
+    }
+    lobbyStatus.textContent = view.canStart
       ? ((isHost ? 'Можно начинать!' : 'Хост может начинать игру') + (currentModule?.autoAssignTeams ? ' Команды распределятся случайно.' : ''))
       : (currentModule?.startRequirementText || 'Недостаточно игроков');
   }
@@ -447,7 +464,7 @@
   }
 
   function renderGame(view) {
-    $('#btn-force-end-game').hidden = !view.me?.isHost;
+    $('#btn-force-end-game').hidden = !view.canForceEnd;
     renderRoster(view);
     $('#round-number').textContent = view.round;
     if (view.scoreboard) {
@@ -480,11 +497,6 @@
     $('#shared-role-hint').hidden = !tv.isSharedPlayer;
     $('#shared-role-hint').textContent = tv.isSharedPlayer
       ? 'Вы общий игрок: шифруете для одной команды и разгадываете код другой. Перехваты и тай-брейк выполняют игроки А и Б.' : '';
-    if (tv.sharedWords) {
-      const other = tv.myTeamKey === 'A' ? 'B' : 'A';
-      $('#word-slots').insertAdjacentHTML('beforeend', `<div class="hint-text">Слова команды ${other === 'A' ? 'А' : 'Б'}: ${tv.sharedWords[other].map((w, i) => `${i + 1}. ${escapeHtml(w)}`).join(' · ')}</div>`);
-    }
-
     $all('.phase-panel').forEach(p => p.classList.remove('active'));
 
     if (view.phase !== 'clue-giving') stopClueTimer();
@@ -595,13 +607,16 @@
     // соло-команде нечего расшифровывать у себя; команде из двух нечего
     // перехватывать у соло-соперника — прячем неактуальную половину панели
     $('#guess-board-own').hidden = isLoneMe;
-    $('#guess-board-intercept').hidden = oppIsLone || tv.isSharedPlayer;
+    $('#guess-board-intercept').hidden = oppIsLone;
+    $('#guess-board-intercept').setAttribute('aria-disabled', String(!!tv.isSharedPlayer));
+    $('#intercept-board-hint').textContent = tv.isSharedPlayer
+      ? '(общий игрок не участвует в перехватах)' : '(попробуйте перехватить)';
 
     ownGuessDraft = tv.ownGuess ? [...tv.ownGuess] : [null, null, null];
     interceptGuessDraft = tv.interceptGuess ? [...tv.interceptGuess] : [null, null, null];
 
     if (!isLoneMe) renderPicker('picker-own', ownGuessDraft, tv.ownLocked || tv.isEncryptor, 'own');
-    if (!oppIsLone) renderPicker('picker-intercept', interceptGuessDraft, tv.interceptLocked, 'intercept');
+    if (!oppIsLone) renderPicker('picker-intercept', interceptGuessDraft, tv.interceptLocked || tv.isSharedPlayer, 'intercept');
 
     $('#own-board-hint').textContent = tv.isEncryptor
       ? '(отгадывают товарищи по команде)'
@@ -611,8 +626,8 @@
     const lockInterceptBtn = $('#lock-intercept');
     lockOwnBtn.disabled = tv.ownLocked || tv.isEncryptor;
     lockOwnBtn.textContent = tv.ownLocked ? 'Подтверждено ✓' : (tv.isEncryptor ? 'Не для вас' : 'Подтвердить');
-    lockInterceptBtn.disabled = tv.interceptLocked;
-    lockInterceptBtn.textContent = tv.interceptLocked ? 'Подтверждено ✓' : 'Подтвердить';
+    lockInterceptBtn.disabled = tv.interceptLocked || tv.isSharedPlayer;
+    lockInterceptBtn.textContent = tv.isSharedPlayer ? 'Недоступно' : tv.interceptLocked ? 'Подтверждено ✓' : 'Подтвердить';
   }
 
   function renderPicker(elId, draft, locked, kind) {
@@ -1108,9 +1123,11 @@
       : won ? 'Победа! 🎉' : (isTtr || !view.me?.team || view.me.team === 'AB' ? 'Игра окончена' : 'Поражение');
     $('#finished-reason').textContent = view.winReason || '';
     const isHost = view.me?.isHost;
-    $('#btn-play-again').hidden = !isHost;
-    $('#finished-wait-hint').hidden = !!isHost;
-    if (!isHost) {
+    const isPublic = view.visibility === 'public';
+    $('#btn-play-again').hidden = !isPublic && !view.canRestart;
+    $('#btn-play-again').textContent = isPublic ? 'Найти новую игру' : 'Играть ещё раз';
+    $('#finished-wait-hint').hidden = isPublic || !!view.canRestart;
+    if (!isPublic && !isHost) {
       const host = view.players.find(p => p.isHost);
       $('#finished-wait-hint').textContent = (host && !host.connected)
         ? `Ждём хоста (${host.name}) — потерял соединение…`
@@ -1145,6 +1162,11 @@
   }
 
   $('#btn-play-again').addEventListener('click', async () => {
+    if (state.lastView?.visibility === 'public') {
+      const res = await findGame(state.lastView.gameType);
+      if (res.error) alert(res.error);
+      return;
+    }
     const res = await emit('play-again', {});
     if (res.error) alert(res.error);
   });
@@ -1575,7 +1597,7 @@
   }
 
   function renderTtrRoster(view) {
-    $('#btn-force-end-game-ttr').hidden = !view.me?.isHost;
+    $('#btn-force-end-game-ttr').hidden = !view.canForceEnd;
     const players = view.ttrPlayers || [];
     const roomPlayers = view.players || [];
     $('#ttr-roster-row').innerHTML = players.map((p) => {
@@ -2545,8 +2567,10 @@
     state.lastView = view;
     currentRoomCode = view.code;
     saveRoomCache(view);
-    history.replaceState(null, '', `${location.pathname}?room=${view.code}&invite=${view.inviteToken}`);
+    history.replaceState(null, '', `${location.pathname}?room=${view.code}${view.visibility === 'private' ? `&invite=${view.inviteToken}` : ''}`);
     updateLeaveButtons(view);
+    const offlineParticipant = view.players.some(p => !p.connected && p.role !== 'spectator');
+    $all('.offline-actions').forEach(panel => { panel.hidden = !(view.status === 'playing' && view.canForceEnd && offlineParticipant); });
     $('#btn-toggle-chat').hidden = false;
     renderChat(view);
     $('#btn-toggle-games').hidden = !(view.pastGames && view.pastGames.length);
@@ -2559,6 +2583,8 @@
       state.ttrLastCurrentPlayerId = view.currentPlayerId;
     }
     if (view.status === 'lobby') {
+      clueInputsRound = null;
+      tiebreakInputsBuilt = false;
       state.historyOpen = false;
       $('#history-panel').hidden = true;
       showScreen('lobby');
@@ -2914,6 +2940,8 @@
 
   async function connectSession() {
     try {
+      const catalog = await fetch('/api/games').then(response => response.json());
+      $('#match-game-select').innerHTML = catalog.map((game, index) => `<label class="match-game-option"><input type="radio" name="match-game" value="${escapeHtml(game.id)}" ${index === 0 ? 'checked' : ''}><span>${escapeHtml(game.label)}</span></label>`).join('');
       const response = await fetch('/api/session', { method: 'POST', credentials: 'same-origin' });
       if (!response.ok) throw new Error('Не удалось открыть сессию');
       const session = await response.json();

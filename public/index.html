@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
-<title>Декодер — онлайн-игра в ассоциации и шифры</title>
+<title>Games Hub — игры с друзьями и подбор игроков</title>
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -20,9 +20,9 @@
     <div class="landing-wrap">
       <div class="brand">
         <span class="brand-mark">◈</span>
-        <h1>ДЕКОДЕР</h1>
+        <h1>GAMES HUB</h1>
       </div>
-      <p class="tagline">Передай код своей команде. Взломай код соперника.</p>
+      <p class="tagline">Найдите игроков или соберите друзей в приватной комнате.</p>
 
       <div class="panel">
         <label class="field">
@@ -30,21 +30,30 @@
           <input id="input-name" type="text" maxlength="20" placeholder="Агент 007" autocomplete="off">
         </label>
 
+        <div id="resume-rooms" hidden></div>
+
         <div class="landing-actions">
-          <button id="btn-create" class="btn btn-primary">Создать комнату</button>
-
-          <div class="divider"><span>или</span></div>
-
-          <label class="field">
-            <span class="field-label">Код комнаты</span>
-            <input id="input-room-code" type="text" maxlength="4" placeholder="XXXX" autocomplete="off" class="mono code-input">
-          </label>
-          <button id="btn-join" class="btn btn-secondary">Войти в комнату</button>
+          <div class="field">
+            <span class="field-label" id="match-game-label">Во что хотите поиграть?</span>
+            <div id="match-game-select" class="match-game-picker" role="group" aria-labelledby="match-game-label"></div>
+          </div>
+          <button id="btn-find-game" class="btn btn-primary" disabled>Найти игру</button>
+          <p class="hint-text"><span class="hint-line">Подберём игроков.</span><span class="hint-line">Игра начнётся автоматически.</span></p>
+          <div class="divider"><span>или с друзьями</span></div>
+          <button id="btn-create" class="btn btn-secondary" disabled>Создать приватную комнату</button>
+          <p class="hint-text">Выберите игру внутри комнаты и отправьте друзьям приглашение.</p>
+          <div id="invitation-entry" hidden>
+            <label class="field">
+              <span class="field-label">Комната из приглашения</span>
+              <input id="input-room-code" type="text" maxlength="4" readonly class="mono code-input">
+            </label>
+            <button id="btn-join" class="btn btn-secondary" disabled>Присоединиться по приглашению</button>
+          </div>
         </div>
 
         <p id="landing-error" class="error-text" hidden></p>
 
-        <button id="btn-list-rooms" class="btn-link">🌐 Все комнаты</button>
+
       </div>
     </div>
   </section>
@@ -60,7 +69,7 @@
     </header>
 
     <div class="lobby-wrap">
-      <p class="lobby-hint">Отправьте ссылку или код союзникам, чтобы они присоединились с телефона или компьютера.</p>
+      <p class="lobby-hint">Отправьте друзьям ссылку-приглашение. По одному номеру войти нельзя.</p>
 
       <div class="field-label">Вид игры</div>
       <div id="game-type-picker" class="game-type-picker"></div>
@@ -113,13 +122,17 @@
         </div>
       </div>
       <button id="btn-toggle-history" class="btn-icon" title="История раундов">📜</button>
-      <button id="btn-force-end-game" class="btn-icon" title="Завершить игру (хост)" hidden>🏁</button>
+      <button id="btn-force-end-game" class="btn-icon" title="Завершить партию" hidden>🏁</button>
       <button id="btn-leave-game" class="btn-icon" title="Выйти из комнаты">🚪</button>
     </header>
 
     <div class="game-wrap">
 
       <div id="roster-row" class="roster-row"></div>
+      <div class="offline-actions" hidden>
+        <p class="hint-text">Участник офлайн. Можно ждать его возвращения или завершить партию.</p>
+        <button class="btn btn-secondary btn-end-offline">Завершить партию</button>
+      </div>
 
       <div id="pause-banner" class="pause-banner" hidden>⏸ <span id="pause-banner-text"></span></div>
 
@@ -169,7 +182,7 @@
             <button class="btn btn-secondary btn-lock" data-kind="own" id="lock-own">Подтвердить</button>
           </div>
           <div class="guess-board" id="guess-board-intercept">
-            <div class="guess-board-head">Код соперника <span class="hint-text">(попробуйте перехватить)</span></div>
+            <div class="guess-board-head">Код соперника <span class="hint-text" id="intercept-board-hint">(попробуйте перехватить)</span></div>
             <div class="digit-picker" data-kind="intercept" id="picker-intercept"></div>
             <button class="btn btn-secondary btn-lock" data-kind="intercept" id="lock-intercept">Подтвердить</button>
           </div>
@@ -206,7 +219,7 @@
   <section id="screen-game-ttr" class="screen">
     <header class="topbar game-topbar">
       <button id="btn-ttr-sound-toggle" class="btn-icon" title="Звук хода: включён">🔔</button>
-      <button id="btn-force-end-game-ttr" class="btn-icon" title="Завершить игру (хост)" hidden>🏁</button>
+      <button id="btn-force-end-game-ttr" class="btn-icon" title="Завершить партию" hidden>🏁</button>
       <button id="btn-leave-game-ttr" class="btn-icon" title="Выйти из комнаты">🚪</button>
     </header>
 
@@ -218,6 +231,10 @@
       </div>
 
       <div id="ttr-roster-row" class="roster-row"></div>
+      <div class="offline-actions" hidden>
+        <p class="hint-text">Участник офлайн. Можно ждать его возвращения или завершить партию.</p>
+        <button class="btn btn-secondary btn-end-offline">Завершить партию</button>
+      </div>
       <p id="ttr-spectators-row" class="hint-text" hidden></p>
       <div id="ttr-turn-indicator" class="ttr-turn-indicator"></div>
 
@@ -288,8 +305,11 @@
       <div class="brand-mark large">◈</div>
       <h2 id="finished-title">Игра окончена</h2>
       <p id="finished-reason" class="tagline"></p>
-      <button id="btn-toggle-history-finished" class="btn btn-secondary">📜 История раундов</button>
-      <button id="btn-play-again" class="btn btn-primary btn-large">Играть ещё раз</button>
+      <div class="finished-actions">
+        <button id="btn-toggle-history-finished" class="btn btn-secondary">📜 История раундов</button>
+        <button id="btn-play-again" class="btn btn-primary btn-large">Играть ещё раз</button>
+        <button id="btn-leave-finished" class="btn btn-secondary">Выйти из комнаты</button>
+      </div>
       <p id="finished-wait-hint" class="hint-text" hidden>Ждём хоста…</p>
     </div>
 
@@ -321,14 +341,7 @@
     </div>
   </section>
 
-  <!-- СПИСОК КОМНАТ — доступен только с экрана входа, до создания/входа в комнату -->
-  <aside id="rooms-panel" class="history-panel" hidden>
-    <div class="history-head">
-      <span>Все комнаты</span>
-      <button id="btn-close-rooms" class="btn-icon">✕</button>
-    </div>
-    <div id="rooms-list" class="rooms-list"></div>
-  </aside>
+
 
   <!-- ПРОШЛЫЕ ИГРЫ В ЭТОЙ КОМНАТЕ — доступно на любом экране внутри комнаты -->
   <button id="btn-toggle-games" class="chat-toggle-btn games-toggle-btn" hidden title="Прошлые игры в этой комнате">🗂</button>

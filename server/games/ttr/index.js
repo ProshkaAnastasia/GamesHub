@@ -36,7 +36,7 @@ class TicketToRideGame {
   constructor(players) {
     // players — общая ссылка на Map из Room, не копия (как и у Декодера)
     this.players = players;
-    this.playerIds = [...players.keys()];
+    this.playerIds = [...players.values()].filter(p => p.connected).map(p => p.id);
     this.playerColor = {};
     this.playerIds.forEach((id, i) => { this.playerColor[id] = PLAYER_COLORS[i % PLAYER_COLORS.length]; });
 
@@ -113,7 +113,7 @@ class TicketToRideGame {
   }
 
   static canStart(_teamOrder, players) {
-    const count = players ? players.size : 0;
+    const count = [...(players?.values() || [])].filter(p => p.connected).length;
     return count >= MIN_PLAYERS && count <= MAX_PLAYERS;
   }
 
@@ -611,6 +611,8 @@ class TicketToRideGame {
 }
 
 module.exports = {
+  minPlayers: MIN_PLAYERS,
+  maxPlayers: MAX_PLAYERS,
   id: 'ttr',
   label: 'Ticket to Ride',
   teamKeys: [], // индивидуальная игра, команд нет — Room.setTeam этим модулем не используется
