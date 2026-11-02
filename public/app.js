@@ -1076,7 +1076,7 @@
     }
     $('#games-list-content').innerHTML = [...games].reverse().map(g => {
       const isDraw = g.winner === 'draw';
-      const title = isDraw ? 'Ничья' : `Победа команды ${g.winner === 'A' ? 'А' : 'Б'}`;
+      const title = g.codenames?.mode === 'duet' ? (g.winner === 'coop-win' ? 'Миссия выполнена' : isDraw ? 'Партия завершена' : 'Миссия провалена') : isDraw ? 'Ничья' : `Победа команды ${g.winner === 'A' ? 'А' : 'Б'}`;
       const when = new Date(g.finishedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       return `
         <button class="games-list-item" data-game="${g.gameNumber}">
@@ -1139,6 +1139,7 @@
     $('#finished-title').textContent = isDraw
       ? 'Ничья! 🤝'
       : won ? 'Победа! 🎉' : (isTtr || !view.me?.team || view.me.team === 'AB' ? 'Игра окончена' : 'Поражение');
+    if (view.codenames?.mode === 'duet') $('#finished-title').textContent = view.winner === 'coop-win' ? 'Миссия выполнена! 🎉' : view.winner === 'draw' ? 'Партия завершена' : 'Миссия провалена';
     $('#finished-reason').textContent = view.winReason || '';
     const isHost = view.me?.isHost;
     const isPublic = view.visibility === 'public';

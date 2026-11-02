@@ -23,7 +23,8 @@ test('Codenames creates a unique 25-card field and balanced teams with one capta
   assert.equal(game.board.filter(c => c.kind === 'assassin').length, 1);
   assert.equal(room.teamOrder.A.length, 2);
   assert.equal(room.teamOrder.B.length, 2);
-  assert.equal(moduleGame.canStart({}, new Map([...room.players].slice(0, 3))), false);
+  assert.equal(moduleGame.canStart({}, new Map([...room.players].slice(0, 3))), true);
+  assert.equal(moduleGame.canStart({}, new Map([...room.players].slice(0, 1))), false);
 });
 
 test('only captains see unrevealed identities; players and spectators receive null', () => {

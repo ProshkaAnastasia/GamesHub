@@ -1,5 +1,6 @@
 // Standalone Codenames rules. Only viewFor exposes data to clients.
 const { WORDS, shuffle } = require('../decoder/words');
+const DuetGame = require('./duet');
 const TEAMS = ['A', 'B'];
 const other = team => team === 'A' ? 'B' : 'A';
 const normalize = word => word.toLocaleLowerCase('ru').replaceAll('ё', 'е');
@@ -24,7 +25,7 @@ class CodenamesGame {
   }
   static canStart(_order, players) {
     const n = [...(players?.values() || [])].filter(p => p.connected).length;
-    return n >= 4 && n <= 8;
+    return n >= 2 && n <= 8;
   }
   static assignTeams(players) {
     const ids = shuffle([...players.values()].filter(p => p.connected).map(p => p.id));
@@ -33,6 +34,7 @@ class CodenamesGame {
     return order;
   }
   static create(players, order, usedWords) {
+    if (order.A.length + order.B.length <= 3) return DuetGame.create(players, order, usedWords);
     const game = new CodenamesGame(players, order);
     const pool = [...new Set(WORDS)];
     if (pool.filter(word => !usedWords.has(word)).length < 25) usedWords.clear();
@@ -43,6 +45,7 @@ class CodenamesGame {
     return game;
   }
   static fromData(data, players, order) {
+    if (data.mode === 'duet') return DuetGame.fromData(data, players, order);
     const game = new CodenamesGame(players, order);
     for (const key of ['captains', 'activeTeam', 'startingTeam', 'round', 'phase', 'clue', 'guessesLeft', 'guessesMade', 'turns', 'finished', 'winner', 'winReason', 'board']) game[key] = data[key];
     return game;
@@ -127,6 +130,6 @@ class CodenamesGame {
   }
 }
 module.exports = { id: 'codenames', label: 'Codenames', teamKeys: TEAMS, autoAssignTeams: true,
-  minPlayers: 4, maxPlayers: 8, startRequirementText: 'От 4 до 8 игроков онлайн. Команды и капитаны выбираются случайно.',
+  minPlayers: 2, maxPlayers: 8, startRequirementText: 'От 2 до 8 игроков: 2–3 — кооперативный «Дуэт», 4–8 — обычный Codenames.',
   canStart: CodenamesGame.canStart, assignTeams: CodenamesGame.assignTeams,
   create: CodenamesGame.create, fromData: CodenamesGame.fromData };

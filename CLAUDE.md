@@ -159,7 +159,7 @@ chooseTickets`), события — в `server/server.js`
 
 ## Codenames
 
-- `server/games/codenames/index.js`: отдельный модуль, 4–8 игроков, команды A/B
+- `server/games/codenames/index.js`: отдельный модуль, 2–8 игроков, команды A/B
   и капитаны назначаются случайно. Словарь переиспользует `decoder/words.js`.
 - Поле 25 карточек, фазы clue / guessing / finished. Действия `codenames-clue`,
   `codenames-reveal`, `codenames-end-turn` валидируются в security.js и делегируются
@@ -169,7 +169,12 @@ chooseTickets`), события — в `server/server.js`
 - `public/codenames.js` обслуживает отдельный экран `screen-game-codenames`,
   итоговый отчёт и архив. Подсказки 0 и unlimited допускают неограниченные попытки;
   завершить ход можно после хотя бы одного выбора. Семантика подсказок — на игроках.
-- Основные тесты в `server/test/codenames.test.js`.
+- При старте с 2–3 игроками создаётся `duet.js`, с 4–8 — обычная версия.
+  Duet: стороны 1+1 или 2+1, два персональных ключа, 15 общих агентов,
+  9 жетонов ходов и фаза sudden-death. Проверка догадки по ключу другой стороны;
+  мирные жители отмечаются по стороне угадывающего. Ключ партнёра скрыт до финала.
+  Сохранения выбирают реализацию по `mode=duet`; старые сохранения — classic.
+- Основные тесты в `server/test/codenames.test.js` и `server/test/duet.test.js`.
 
 - Накладки Codenames: PNG в `public/codenames/cards/`, имена сопоставляются в
   `cardImages` (`public/codenames.js`). `renderBoard` сохраняет DOM карточек через
