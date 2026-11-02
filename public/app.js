@@ -1,5 +1,5 @@
 (() => {
-  const socket = io();
+  const socket = io({ autoConnect: false });
 
   const state = {
     myId: null,
@@ -21,7 +21,8 @@
 
   function emit(event, payload = {}) {
     return new Promise((resolve) => {
-      socket.emit(event, payload, (res) => resolve(res || {}));
+      if (!socket.connected) return resolve({ error: 'Нет соединения с сервером' });
+      socket.timeout(10000).emit(event, payload, (error, res) => resolve(error ? { error: 'Сервер не ответил. Повторите действие.' } : (res || {})));
     });
   }
 
@@ -65,16 +66,7 @@
   // ---------- персистентная личность и кэш комнаты ----------
   // clientId переживает перезагрузку страницы (в отличие от socket.id),
   // это позволяет узнать вернувшегося игрока и восстановить его в комнате
-  function getClientId() {
-    let id = null;
-    try { id = localStorage.getItem('decoder_client_id'); } catch (e) {}
-    if (!id) {
-      id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-      try { localStorage.setItem('decoder_client_id', id); } catch (e) {}
-    }
-    return id;
-  }
-  const clientId = getClientId();
+  let clientId = null;
 
   function saveRoomCache(view) {
     try {
@@ -114,7 +106,7 @@
         if (res.error) {
           currentRoomCode = null;
           clearRoomCache();
-          history.replaceState(null, '', location.pathname);
+          // Keep the invitation URL so a new visitor can join after rejoin fails.
           // комнаты, чей чат мы оптимистично отрисовали из кэша, на самом
           // деле больше нет — прячем чат обратно, иначе кнопка и старые
           // сообщения останутся висеть поверх экрана входа
@@ -192,7 +184,8 @@
     const rejoinRes = await emit('rejoin-room', { roomCode, clientId });
     if (rejoinRes.ok) return;
 
-    const res = await emit('join-room', { name, roomCode, clientId });
+    const invite = new URLSearchParams(location.search).get('invite') || undefined;
+    const res = await emit('join-room', { name, roomCode, invite });
     if (res.error) return showError(landingError, res.error);
   });
 
@@ -262,7 +255,7 @@
   $('#btn-copy-link').addEventListener('click', async () => {
     const code = state.lastView?.code;
     if (!code) return;
-    const url = `${location.origin}${location.pathname}?room=${code}`;
+    const url = `${location.origin}${location.pathname}?room=${code}&invite=${state.lastView.inviteToken}`;
     const btn = $('#btn-copy-link');
     const ok = await copyTextToClipboard(url);
     const prevText = btn.textContent;
@@ -2552,7 +2545,7 @@
     state.lastView = view;
     currentRoomCode = view.code;
     saveRoomCache(view);
-    history.replaceState(null, '', `${location.pathname}?room=${view.code}`);
+    history.replaceState(null, '', `${location.pathname}?room=${view.code}&invite=${view.inviteToken}`);
     updateLeaveButtons(view);
     $('#btn-toggle-chat').hidden = false;
     renderChat(view);
@@ -2919,20 +2912,32 @@
     sendChatMessage();
   });
 
-  // отрисовать закэшированный вид комнаты сразу, не дожидаясь ответа сервера
-  // (чтобы при перезагрузке страницы не было пустого экрана) — обязательно
-  // в самом конце скрипта, когда все let/const-переменные рендер-пайплайна
-  // (clueTimerInterval, ownGuessDraft и т.д.) уже инициализированы, иначе
-  // обращение к ним до объявления кидает ReferenceError и обрывает весь
-  // остальной скрипт, включая регистрацию обработчиков кнопок и socket-событий
-  if (currentRoomCode) {
-    const cached = readCachedView(currentRoomCode);
-    if (cached) applyRoomUpdate(cached);
+  async function connectSession() {
+    try {
+      const response = await fetch('/api/session', { method: 'POST', credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Не удалось открыть сессию');
+      const session = await response.json();
+      clientId = session.playerId;
+      // Old cached secrets belong to an unverified legacy browser identity.
+      try {
+        if (localStorage.getItem('decoder_client_id') !== clientId) clearRoomCache();
+        localStorage.setItem('decoder_client_id', clientId);
+      } catch (e) {}
+      if (currentRoomCode) {
+        const cached = readCachedView(currentRoomCode);
+        if (cached) applyRoomUpdate(cached);
+      }
+      socket.connect();
+    } catch (e) {
+      showError(landingError, 'Не удалось подключиться. Проверьте адрес сайта и обновите страницу.');
+    }
   }
+  socket.on('connect_error', () => showError(landingError, 'Не удалось подключиться. Обновите страницу.'));
+  connectSession();
 
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
-    return div.innerHTML;
+    return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
   }
 })();

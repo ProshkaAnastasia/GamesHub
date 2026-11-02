@@ -4,6 +4,7 @@
 // доступны через this.game — Room ничего не знает об их внутреннем
 // устройстве, только вызывает общий контракт (см. ./games/decoder/index.js).
 const store = require('./store');
+const { randomBytes } = require('crypto');
 const { GAME_MODULES, GAME_LIST, DEFAULT_GAME_TYPE } = require('./games');
 
 function makeRoomCode() {
@@ -16,6 +17,7 @@ function makeRoomCode() {
 class Room {
   constructor(code) {
     this.code = code;
+    this.inviteToken = randomBytes(24).toString('hex');
     this.createdAt = Date.now();
     this.hostId = null;
     this.players = new Map(); // id -> {id, name, team, connected}
@@ -279,6 +281,7 @@ class Room {
 
     const base = {
       code: this.code,
+      inviteToken: this.inviteToken,
       status: this.status,
       gameType: this.gameType,
       availableGameTypes: GAME_LIST,
@@ -301,6 +304,7 @@ class Room {
   toJSON() {
     return {
       code: this.code,
+      inviteToken: this.inviteToken,
       createdAt: this.createdAt,
       hostId: this.hostId,
       players: [...this.players.values()],
@@ -318,6 +322,7 @@ class Room {
   // восстановление комнаты из сохранённых данных (после перезапуска сервера)
   static fromData(data) {
     const room = new Room(data.code);
+    room.inviteToken = data.inviteToken || room.inviteToken;
     room.createdAt = data.createdAt;
     room.hostId = data.hostId;
     // после перезапуска ни у кого ещё нет живого сокета — все офлайн,

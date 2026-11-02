@@ -1,11 +1,36 @@
 services:
   decoder:
     build: .
-    container_name: decoder-game
     restart: unless-stopped
+    init: true
     ports:
-      - "3000:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-3000}:3000"
     environment:
-      - PORT=3000
+      PORT: 3000
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      PUBLIC_ROOM_LIST: ${PUBLIC_ROOM_LIST:-false}
+      REQUIRE_INVITE: ${REQUIRE_INVITE:-true}
+      MAX_ROOMS: ${MAX_ROOMS:-500}
+      MAX_CONNECTIONS: ${MAX_CONNECTIONS:-200}
+      EVENTS_PER_MINUTE: ${EVENTS_PER_MINUTE:-180}
+      JOINS_PER_MINUTE: ${JOINS_PER_MINUTE:-30}
+      CREATES_PER_HOUR: ${CREATES_PER_HOUR:-10}
+      CONNECTIONS_PER_MINUTE: ${CONNECTIONS_PER_MINUTE:-120}
     volumes:
       - ./data:/app/server/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

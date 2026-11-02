@@ -1,4 +1,8 @@
 const path = require('path');
+const { readConfig, loadSecret, createIdentity, createLimiter, validPayload } = require('./security');
+const config = readConfig();
+const identity = createIdentity(loadSecret(process.env.DATA_DIR || path.join(__dirname, 'data')));
+const allow = createLimiter();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -13,12 +17,45 @@ const { TRAIN_COLORS } = require('./games/ttr/rules');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' },
+  cors: { origin: config.origins, credentials: true },
+  maxHttpBufferSize: 16 * 1024,
+  allowRequest: (req, done) => done(null, io.engine.clientsCount < config.maxConnections && config.origins.includes(req.headers.origin) && allow(`connect:${req.socket.remoteAddress}`, config.connectionsPerMinute, 60000)),
 });
 
 const PORT = process.env.PORT || 3000;
+server.headersTimeout = 15000;
+server.requestTimeout = 30000;
 const manager = new RoomManager();
 const DISCONNECT_GRACE_MS = 25 * 1000;
+
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('X-Frame-Options', 'DENY');
+  // Inline styles are used by the existing renderer; scripts remain same-origin.
+  res.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+  if (config.secureCookie) res.set('Strict-Transport-Security', 'max-age=31536000');
+  next();
+});
+app.post('/api/session', (req, res) => {
+  if (!config.origins.includes(req.headers.origin)) return res.sendStatus(403);
+  if (!allow(`session:${req.socket.remoteAddress}`, config.connectionsPerMinute, 60000)) return res.sendStatus(429);
+  res.set('Cache-Control', 'no-store');
+  let id = identity.verify(req.headers.cookie);
+  if (!id) {
+    const session = identity.issue();
+    id = session.id;
+    res.set('Set-Cookie', `gameshub_session=${session.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000${config.secureCookie ? '; Secure' : ''}`);
+  }
+  res.json({ playerId: id });
+});
+io.use((socket, next) => {
+  const id = identity.verify(socket.request.headers.cookie);
+  if (!id) return next(new Error('Сессия истекла. Перезагрузите страницу.'));
+  socket.data.playerId = id;
+  next();
+});
 
 // проект активно меняется день ото дня — без явного запрета кеширования
 // браузеры (особенно Safari) иногда придерживают старую копию styles.css/
@@ -78,26 +115,46 @@ function scheduleRevealAdvance(room, delayMs = REVEAL_TIME_MS) {
 function broadcastRoom(room) {
   manager.save(room);
   for (const player of room.players.values()) {
-    const sockId = [...sessions.entries()].find(
-      ([, s]) => s.roomCode === room.code && s.playerId === player.id
-    )?.[0];
-    if (sockId) {
-      io.to(sockId).emit('room-update', room.viewFor(player.id));
+    for (const [sockId, session] of sessions) {
+      if (session.roomCode === room.code && session.playerId === player.id) {
+        io.to(sockId).emit('room-update', room.viewFor(player.id));
+      }
     }
   }
 }
 
 io.on('connection', (socket) => {
-  socket.on('list-rooms', (_, cb) => {
-    cb?.({ ok: true, rooms: manager.listSummaries() });
+  // Guard every application handler, including malformed payloads and callbacks.
+  function onEvent(event, handler) {
+    return socket.on(event, (payload, callback) => {
+      const cb = typeof callback === 'function' ? callback : () => {};
+      if (!identity.verify(socket.request.headers.cookie)) return cb({ error: 'Сессия истекла. Обновите страницу.' });
+      const ip = socket.handshake.address;
+      if (!allow(`events:${socket.data.playerId}`, config.eventsPerMinute, 60000)
+          || !allow(`ip-events:${ip}`, config.eventsPerMinute * 10, 60000)) return cb({ error: 'Слишком много действий. Подождите немного.' });
+      if (!validPayload(event, payload)) return cb({ error: 'Неверный формат запроса' });
+      if (['join-room', 'rejoin-room'].includes(event) && !allow(`join:${ip}`, config.joinsPerMinute, 60000)) return cb({ error: 'Слишком много попыток входа' });
+      if (event === 'create-room' && !allow(`create:${ip}`, config.createsPerHour, 3600000)) return cb({ error: 'Слишком много созданных комнат' });
+      try { handler(payload, cb); }
+      catch (error) {
+        console.error(`Ошибка события ${event}:`, error.message);
+        cb({ error: 'Не удалось выполнить действие' });
+      }
+    });
+  };
+  onEvent('list-rooms', (_, cb) => {
+    cb?.({ ok: true, rooms: config.publicRooms ? manager.listSummaries() : [] });
   });
 
-  socket.on('create-room', ({ name, clientId }, cb) => {
+  onEvent('create-room', ({ name }, cb) => {
     try {
+      if (manager.rooms.size >= config.maxRooms) return cb({ error: 'Достигнут лимит комнат' });
+      if (!detachRoom(socket, cb)) return;
       const room = manager.createRoom();
-      const playerId = clientId || socket.id;
+      const playerId = socket.data.playerId;
       room.addPlayer(playerId, (name || 'Игрок').trim() || 'Игрок');
       socket.join(room.code);
+      clearDisconnectTimer(room.code, playerId);
       sessions.set(socket.id, { roomCode: room.code, playerId });
       cb?.({ ok: true, roomCode: room.code });
       broadcastRoom(room);
@@ -106,11 +163,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('join-room', ({ name, roomCode, clientId }, cb) => {
+  onEvent('join-room', ({ name, roomCode, invite }, cb) => {
     const room = manager.get(roomCode);
     if (!room) return cb?.({ error: 'Комната не найдена' });
+    if (config.requireInvite && invite !== room.inviteToken) return cb({ error: 'Для входа нужна ссылка-приглашение' });
+    if (room.players.has(socket.data.playerId)) return cb({ error: 'Используйте восстановление подключения' });
     if (room.players.size >= 8) return cb?.({ error: 'Комната заполнена' });
-    const playerId = clientId || socket.id;
+    if (!detachRoom(socket, cb)) return;
+    const playerId = socket.data.playerId;
     const trimmedName = (name || 'Игрок').trim() || 'Игрок';
     // партия уже идёт — подключаем зрителем, а если это TTR и она ещё
     // позволяет добавить живого игрока (см. Room.joinInProgress) — игроком
@@ -118,16 +178,19 @@ io.on('connection', (socket) => {
       ? room.addPlayer(playerId, trimmedName)
       : room.joinInProgress(playerId, trimmedName);
     socket.join(room.code);
+    clearDisconnectTimer(room.code, playerId);
     sessions.set(socket.id, { roomCode: room.code, playerId });
     cb?.({ ok: true, roomCode: room.code, role: player.role || 'player' });
     broadcastRoom(room);
   });
 
-  socket.on('rejoin-room', ({ roomCode, clientId }, cb) => {
+  onEvent('rejoin-room', ({ roomCode }, cb) => {
+    const clientId = socket.data.playerId;
     const room = manager.get(roomCode);
     if (!room || !clientId) return cb?.({ error: 'Комната не найдена' });
     const player = room.players.get(clientId);
     if (!player) return cb?.({ error: 'Игрок не найден в комнате' });
+    if (!detachRoom(socket, cb, room.code)) return;
     clearDisconnectTimer(room.code, clientId);
     room.setConnected(clientId, true);
     socket.join(room.code);
@@ -136,7 +199,7 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
-  socket.on('choose-team', ({ team }, cb) => {
+  onEvent('choose-team', ({ team }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -145,7 +208,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('set-game-type', ({ gameType }, cb) => {
+  onEvent('set-game-type', ({ gameType }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -154,7 +217,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('start-game', (_, cb) => {
+  onEvent('start-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -164,7 +227,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('submit-clues', ({ clues }, cb) => {
+  onEvent('submit-clues', ({ clues }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -173,7 +236,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('update-guess', ({ kind, guess }, cb) => {
+  onEvent('update-guess', ({ kind, guess }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -182,7 +245,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('lock-guess', ({ kind }, cb) => {
+  onEvent('lock-guess', ({ kind }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -195,7 +258,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('update-tiebreak-guess', ({ words }, cb) => {
+  onEvent('update-tiebreak-guess', ({ words }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -204,7 +267,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('lock-tiebreak-guess', (_, cb) => {
+  onEvent('lock-tiebreak-guess', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -214,7 +277,7 @@ io.on('connection', (socket) => {
   });
 
   // --- Ticket to Ride ---
-  socket.on('draw-card', ({ source }, cb) => {
+  onEvent('draw-card', ({ source }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -223,7 +286,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('claim-route', ({ routeId, payment }, cb) => {
+  onEvent('claim-route', ({ routeId, payment }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -232,7 +295,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('resolve-tunnel', ({ decision }, cb) => {
+  onEvent('resolve-tunnel', ({ decision }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -241,7 +304,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('draw-tickets', (_, cb) => {
+  onEvent('draw-tickets', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -250,7 +313,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('choose-tickets', ({ keepIndices }, cb) => {
+  onEvent('choose-tickets', ({ keepIndices }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -259,7 +322,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('build-station', ({ routeId, payment }, cb) => {
+  onEvent('build-station', ({ routeId, payment }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -268,7 +331,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('force-end-game', (_, cb) => {
+  onEvent('force-end-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -278,7 +341,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('play-again', (_, cb) => {
+  onEvent('play-again', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -288,7 +351,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('send-chat', ({ text, replyTo }, cb) => {
+  onEvent('send-chat', ({ text, replyTo }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -297,7 +360,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('edit-chat', ({ id, text }, cb) => {
+  onEvent('edit-chat', ({ id, text }, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -306,7 +369,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('mark-chat-read', (_, cb) => {
+  onEvent('mark-chat-read', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);
     if (!room) return cb?.({ error: 'Нет комнаты' });
@@ -315,7 +378,7 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
-  socket.on('leave-room', (_, cb) => {
+  onEvent('leave-room', (_, cb) => {
     // осознанный выход разрешён только тогда, когда он не ломает текущий
     // раунд команды; обрыв связи (когда игрок ничего не выбирал) — другое
     // дело, там game просто ставится на паузу баннером, т.к. это не отменить
@@ -330,7 +393,7 @@ io.on('connection', (socket) => {
     if (room) {
       clearDisconnectTimer(room.code, s.playerId);
       socket.leave(room.code);
-      room.removePlayer(s.playerId);
+      if (!hasConnection(s.roomCode, s.playerId)) room.removePlayer(s.playerId);
       broadcastRoom(room);
     }
     cb?.({ ok: true });
@@ -341,12 +404,31 @@ io.on('connection', (socket) => {
   });
 });
 
+function hasConnection(roomCode, playerId) {
+  return [...sessions.values()].some(s => s.roomCode === roomCode && s.playerId === playerId);
+}
+function detachRoom(socket, cb, nextRoomCode) {
+  const previous = sessions.get(socket.id);
+  if (!previous || previous.roomCode === nextRoomCode) return true;
+  const room = manager.get(previous.roomCode);
+  const check = room?.canPlayerLeaveSafely(previous.playerId);
+  if (check && !check.safe) { cb({ error: check.reason }); return false; }
+  sessions.delete(socket.id);
+  socket.leave(previous.roomCode);
+  if (room && !hasConnection(previous.roomCode, previous.playerId)) {
+    clearDisconnectTimer(previous.roomCode, previous.playerId);
+    room.removePlayer(previous.playerId);
+    broadcastRoom(room);
+  }
+  return true;
+}
+
 function handleDisconnect(socket) {
   const s = sessions.get(socket.id);
   if (!s) return;
   sessions.delete(socket.id);
   const room = manager.get(s.roomCode);
-  if (!room) return;
+  if (!room || hasConnection(s.roomCode, s.playerId)) return;
 
   // помечаем игрока офлайн сразу, но даём время вернуться (например, после
   // перезагрузки страницы), прежде чем окончательно убрать его из комнаты
@@ -358,7 +440,7 @@ function handleDisconnect(socket) {
     disconnectTimers.delete(key);
     const player = room.players.get(s.playerId);
     if (player && !player.connected) {
-      room.removePlayer(s.playerId);
+      if (!hasConnection(s.roomCode, s.playerId)) room.removePlayer(s.playerId);
       broadcastRoom(room);
     }
   }, DISCONNECT_GRACE_MS);
@@ -381,5 +463,5 @@ for (const room of manager.rooms.values()) {
 }
 
 server.listen(PORT, () => {
-  console.log(`Декодер запущен на порту ${PORT}`);
+  console.log(`Декодер запущен на порту ${server.address().port}`);
 });

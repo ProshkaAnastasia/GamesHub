@@ -1,0 +1,5 @@
+# Install Caddy on the Linux host. Replace with your domain, point its DNS
+# to this server, and allow inbound TCP 80/443. Caddy obtains TLS certificates.
+games.example.com {
+    reverse_proxy 127.0.0.1:3000
+}
