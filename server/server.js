@@ -368,6 +368,19 @@ io.on('connection', (socket) => {
     if (res.ok) broadcastRoom(room);
   });
 
+  for (const [event, method, args] of [
+    ['codenames-clue', 'codenamesClue', p => [p.word, p.count]],
+    ['codenames-reveal', 'codenamesReveal', p => [p.index]],
+    ['codenames-end-turn', 'codenamesEndTurn', () => []],
+  ]) onEvent(event, (payload, cb) => {
+    const session = sessions.get(socket.id);
+    const room = session && manager.get(session.roomCode);
+    if (!room || room.gameType !== 'codenames') return cb({ error: 'Сейчас нет партии Codenames' });
+    const result = room[method](session.playerId, ...args(payload));
+    cb(result);
+    if (result.ok) broadcastRoom(room);
+  });
+
   onEvent('force-end-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);

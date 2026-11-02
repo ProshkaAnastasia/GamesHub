@@ -241,6 +241,10 @@ class Room {
   updateTiebreakGuess(playerId, words) { return this._delegate('updateTiebreakGuess', playerId, words); }
   lockTiebreakGuess(playerId) { return this._delegate('lockTiebreakGuess', playerId); }
 
+  codenamesClue(playerId, word, count) { return this._delegate('giveClue', playerId, word, count); }
+  codenamesReveal(playerId, index) { return this._delegate('revealCard', playerId, index); }
+  codenamesEndTurn(playerId) { return this._delegate('endTurn', playerId); }
+
   drawCard(playerId, source) { return this._delegate('drawCard', playerId, source); }
   claimRoute(playerId, routeId, payment) { return this._delegate('claimRoute', playerId, routeId, payment); }
   resolveTunnel(playerId, decision) { return this._delegate('resolveTunnel', playerId, decision); }

@@ -203,7 +203,7 @@
     const rooms = res.rooms || [];
     wrap.hidden = rooms.length === 0;
     wrap.innerHTML = rooms.map(room => `
-      <button class="btn btn-secondary resume-room" data-code="${escapeHtml(room.code)}">${room.status === 'finished' ? 'Посмотреть завершённую игру' : 'Вернуться в игру'} · ${room.gameType === 'ttr' ? 'Ticket to Ride' : room.gameType === 'decoder' ? 'Декодер' : 'Приватная комната'} · ${escapeHtml(room.code)}</button>
+      <button class="btn btn-secondary resume-room" data-code="${escapeHtml(room.code)}">${room.status === 'finished' ? 'Посмотреть завершённую игру' : 'Вернуться в игру'} · ${room.gameType === 'codenames' ? 'Codenames' : room.gameType === 'ttr' ? 'Ticket to Ride' : room.gameType === 'decoder' ? 'Декодер' : 'Приватная комната'} · ${escapeHtml(room.code)}</button>
     `).join('');
     wrap.querySelectorAll('.resume-room').forEach(button => button.addEventListener('click', async () => {
       const result = await emit('rejoin-room', { roomCode: button.dataset.code });
@@ -286,6 +286,7 @@
   $('#btn-leave-lobby').addEventListener('click', leaveRoom);
   $('#btn-leave-game').addEventListener('click', leaveRoom);
   $('#btn-leave-game-ttr').addEventListener('click', leaveRoom);
+  $('#btn-leave-game-cn').addEventListener('click', leaveRoom);
 
   const btnTtrSoundToggle = $('#btn-ttr-sound-toggle');
   function renderTtrSoundToggle() {
@@ -307,11 +308,12 @@
   $all('.btn-end-offline').forEach(button => button.addEventListener('click', forceEndGame));
   $('#btn-force-end-game').addEventListener('click', forceEndGame);
   $('#btn-force-end-game-ttr').addEventListener('click', forceEndGame);
+  $('#btn-force-end-game-cn').addEventListener('click', forceEndGame);
 
   function updateLeaveButtons(view) {
     const safe = view.canLeaveSafely?.safe !== false;
     const reason = view.canLeaveSafely?.reason;
-    [$('#btn-leave-lobby'), $('#btn-leave-game'), $('#btn-leave-game-ttr')].forEach((btn) => {
+    [$('#btn-leave-lobby'), $('#btn-leave-game'), $('#btn-leave-game-ttr'), $('#btn-leave-game-cn')].forEach((btn) => {
       btn.disabled = !safe;
       btn.title = safe ? 'Выйти из комнаты' : reason;
     });
@@ -1092,6 +1094,14 @@
   }
 
   function renderGameDetail(view, game) {
+    if (game.gameType === 'codenames') {
+      $('#games-list-content').hidden = true;
+      $('#games-detail-content').hidden = false;
+      $('#games-detail-title').textContent = `Codenames — игра ${game.gameNumber}`;
+      window.CodenamesUI.report(game.codenames, '#games-detail-history');
+      $('#games-detail-assoc').innerHTML = '';
+      return;
+    }
     const perspectiveTeam = view.me?.team === 'B' ? 'B' : 'A';
     const pastTv = buildPastGameTv(game, perspectiveTeam);
     const pastView = { loneTeam: game.loneTeam };
@@ -1122,6 +1132,7 @@
 
   // ---------- ЭКРАН: конец игры ----------
   function renderFinished(view) {
+    $('#codenames-finished-report').hidden = view.gameType !== 'codenames';
     const isTtr = view.gameType === 'ttr';
     const isDraw = view.winner === 'draw';
     const won = isTtr ? (view.winner === view.me?.id) : (!isDraw && view.me?.team && view.winner === view.me.team);
@@ -1141,6 +1152,13 @@
         : 'Ждём хоста…';
     }
 
+    if (view.gameType === 'codenames') {
+      $('#finished-report').hidden = true;
+      $('#ttr-finished-report').hidden = true;
+      $('#btn-toggle-history-finished').hidden = true;
+      window.CodenamesUI.report(view.codenames, '#codenames-finished-report', `${view.code}:${view.pastGames.length}`);
+      return;
+    }
     if (isTtr) {
       $('#finished-report').hidden = true;
       $('#btn-toggle-history-finished').hidden = true;
@@ -2596,6 +2614,9 @@
       $('#history-panel').hidden = true;
       showScreen('lobby');
       renderLobby(view);
+    } else if (view.status === 'playing' && view.gameType === 'codenames') {
+      showScreen('game-codenames');
+      window.CodenamesUI.render(view, emit);
     } else if (view.status === 'playing' && isTtr) {
       const freshStart = state.ttrLastStatus !== 'playing';
       showScreen('game-ttr');

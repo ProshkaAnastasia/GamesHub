@@ -245,9 +245,10 @@ h1 {
 .lobby-wrap { max-width: 720px; margin: 0 auto; }
 .lobby-hint { color: var(--text-muted); text-align: center; font-size: 14px; margin-bottom: 24px; }
 
-.game-type-picker { display: flex; gap: 8px; margin-bottom: 20px; }
+.game-type-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .game-type-btn {
-  flex: 1;
+  flex: 1 1 130px;
+  min-width: 0;
   background: var(--panel-raised);
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -1575,7 +1576,7 @@ h1 {
 .hint-line { display: block; }
 #invitation-entry:not([hidden]) { display: grid; gap: 14px; }
 #invitation-entry > .field { margin: 0; }
-.match-game-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.match-game-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 24px; }
 .match-game-option { display: block; position: relative; min-width: 0; cursor: pointer; }
 .match-game-option input {
   position: absolute; width: 1px; height: 1px; opacity: 0;
@@ -1627,3 +1628,103 @@ h1 {
 .h-code-head { margin-top: 10px; color: var(--text-muted); font-size: 10px; text-align: center; }
 .h-line.h-code-line { margin-top: 10px; }
 .h-code-line .h-line-label { min-width: 0; }
+
+/* Codenames: a fixed 5×5 field keeps positions identical for all players. */
+:root { --cn-blue: #5597ff; --cn-red: #f36b75; --cn-white: #f1f3f5; }
+#screen-game-codenames { --team-a: var(--cn-blue); --team-b: var(--cn-red); }
+#screen-game-codenames .game-wrap, #screen-game-codenames .game-topbar { max-width: 900px; }
+#screen-game-codenames .game-topbar > strong { margin-right: auto; font-family: var(--font-display); }
+.cn-status { text-align: center; margin: 24px 0 12px; line-height: 1.5; }
+.cn-scores { display: flex; justify-content: center; gap: 24px; margin-bottom: 16px; }
+.cn-count-A { color: var(--cn-blue); } .cn-count-B { color: var(--cn-red); }
+.cn-board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 24px 0; }
+.cn-card { min-width: 0; min-height: 100px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; padding: 12px 6px; border: 2px solid var(--border); border-radius: var(--radius); background: var(--panel-raised); color: var(--text); font: 700 15px var(--font-body); overflow-wrap: anywhere; cursor: pointer; }
+.cn-card:disabled { cursor: default; opacity: 1; }
+.cn-card:not(:disabled):hover, .cn-card:not(:disabled):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cn-A { border-color: #365480; background: #17263f; color: #b4c8e9; }
+.cn-B { border-color: #77424a; background: #351d24; color: #e4bfc4; }
+.cn-neutral { border-color: #747d87; background: #33383e; color: #e1e5e9; }
+.cn-assassin { border-color: #65505a; background: #151317; color: #d7c2cd; }
+.cn-card.cn-revealed { position: relative; opacity: 1; border-style: solid; }
+.cn-revealed::after { content: '✓'; position: absolute; top: 5px; right: 7px; font-size: 12px; }
+.cn-A.cn-revealed { border-color: var(--cn-blue); background: var(--cn-blue); color: #071b35; }
+.cn-B.cn-revealed { border-color: var(--cn-red); background: var(--cn-red); color: #300b12; }
+.cn-neutral.cn-revealed { border-color: var(--cn-white); background: var(--cn-white); color: #24282e; }
+.cn-assassin.cn-revealed { border-color: var(--danger); background: #050608; color: #ffe4e8; box-shadow: inset 0 0 0 1px var(--danger); }
+.cn-pick-A { color: var(--cn-blue); } .cn-pick-B { color: var(--cn-red); }
+.cn-pick-neutral { color: var(--cn-white); } .cn-pick-assassin { color: var(--danger); }
+.cn-clue-form:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) auto 100px; gap: 16px; align-items: end; margin: 24px 0; }
+.cn-clue-form .field { margin: 0; }
+.cn-clue-form .btn { grid-column: 1 / -1; }
+.cn-clue-separator { padding-bottom: 13px; color: var(--text-muted); }
+#cn-clue-count { width: 100%; min-height: 46px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; font: inherit; }
+.cn-rules { margin: 24px 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.cn-turn { margin: 12px 0; padding: 14px; background: var(--panel); border-left: 3px solid var(--cn-blue); border-radius: var(--radius); font-size: 13px; overflow-wrap: anywhere; }
+.cn-turn.team-b { border-left-color: var(--cn-red); }
+#codenames-finished-report { max-width: 900px; }
+@media (max-width: 560px) {
+  .cn-board { gap: 5px; }
+  .cn-card { min-height: 76px; padding: 8px 3px; font-size: 11px; }
+}
+
+/* Captains can immediately identify their own unrevealed agents. */
+.cn-card.cn-own-agent { position: relative; border-width: 3px; }
+.cn-A.cn-own-agent { border-color: var(--cn-blue); box-shadow: 0 0 0 2px rgba(85, 151, 255, .18); color: #d9e8ff; }
+.cn-B.cn-own-agent { border-color: var(--cn-red); box-shadow: 0 0 0 2px rgba(243, 107, 117, .18); color: #ffe0e3; }
+.cn-own-agent::before { content: ''; position: absolute; top: 7px; left: 7px; width: 7px; height: 7px; border-radius: 50%; }
+.cn-A.cn-own-agent::before { background: var(--cn-blue); }
+.cn-B.cn-own-agent::before { background: var(--cn-red); }
+
+/* Revealed cards receive an illustrated cover, like a token laid on the word. */
+.cn-card { position: relative; isolation: isolate; }
+.cn-card-cover { position: absolute; inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); object-fit: cover; object-position: center 38%; border-radius: 3px; opacity: 0; pointer-events: none; z-index: 0; }
+.cn-art-loaded .cn-card-cover { opacity: 1; }
+.cn-card > span { position: relative; z-index: 1; }
+.cn-art-loaded > span { align-self: stretch; margin-top: auto; margin-bottom: -4px; padding: 4px 3px; border-radius: 3px; background: rgba(5, 10, 16, .85); color: #fff; text-shadow: 0 1px 2px #000; }
+.cn-revealed::after { z-index: 2; color: #fff; background: rgba(5, 10, 16, .75); border-radius: 50%; width: 17px; height: 17px; line-height: 17px; text-align: center; }
+.cn-animating { z-index: 5; }
+.cn-cover-enter { animation: cn-cover-place 440ms cubic-bezier(.2, .7, .25, 1) both; }
+@keyframes cn-cover-place {
+  0% { opacity: 0; transform: translateY(-22px) rotate(-7deg) scale(1.18); filter: drop-shadow(0 16px 10px rgba(0, 0, 0, .5)); }
+  65% { opacity: 1; transform: translateY(1px) rotate(1deg) scale(.98); filter: drop-shadow(0 3px 2px rgba(0, 0, 0, .25)); }
+  100% { opacity: 1; transform: translateY(0) rotate(0) scale(1); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .2)); }
+}
+@media (prefers-reduced-motion: reduce) { .cn-cover-enter { animation: none; } }
+
+/* Printed word cards; captain colors are a light wash over the paper. */
+.cn-card {
+  --cn-word-tint: rgba(255, 255, 255, 0);
+  background-image: linear-gradient(var(--cn-word-tint), var(--cn-word-tint)), url('/codenames/cards/%D0%A8%D0%B0%D0%B1%D0%BB%D0%BE%D0%BD%20%D0%B4%D0%BB%D1%8F%20%D1%81%D0%BB%D0%BE%D0%B2%D0%B0.png');
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.cn-A { --cn-word-tint: rgba(85, 151, 255, .18); }
+.cn-B { --cn-word-tint: rgba(243, 107, 117, .18); }
+.cn-neutral { --cn-word-tint: rgba(255, 255, 255, .12); }
+.cn-assassin { --cn-word-tint: rgba(40, 38, 46, .22); }
+.cn-card:not(.cn-art-loaded) > span {
+  width: 100%; padding: 0 7%;
+  font-size: clamp(13px, 1.5vw, 18px); font-weight: 400; line-height: 1.25;
+  color: #4b4b50; text-align: center; text-shadow: none;
+}
+.cn-card.cn-art-loaded { background-image: none; }
+@media (max-width: 560px) {
+  .cn-card:not(.cn-art-loaded) > span { font-size: clamp(10px, 2.6vw, 13px); padding: 0 3%; }
+}
+
+/* Printed serif lettering complements the vintage paper and spy illustrations. */
+.cn-card > span {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: .01em;
+}
+
+/* An illustrated cover is enough to identify a revealed card. */
+.cn-card.cn-art-loaded {
+  border-color: var(--border);
+  background-color: var(--panel);
+  box-shadow: none;
+}
+.cn-card:disabled:focus { outline: none; }

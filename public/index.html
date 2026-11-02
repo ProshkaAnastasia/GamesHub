@@ -302,6 +302,31 @@
     </div>
   </section>
 
+  <section id="screen-game-codenames" class="screen">
+    <header class="topbar game-topbar">
+      <strong>Codenames</strong>
+      <button id="btn-force-end-game-cn" class="btn-icon" title="Завершить партию" hidden>🏁</button>
+      <button id="btn-leave-game-cn" class="btn-icon" title="Выйти из комнаты">🚪</button>
+    </header>
+    <div class="game-wrap">
+      <div id="cn-roster" class="roster-row"></div>
+      <div class="offline-actions" hidden><p class="hint-text">Участник офлайн. Можно ждать возвращения или завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>
+      <div id="cn-status" class="cn-status" role="status"></div>
+      <p id="cn-role" class="hint-text"></p>
+      <div id="cn-board" class="cn-board" aria-label="Поле Codenames"></div>
+      <form id="cn-clue-form" class="cn-clue-form" hidden>
+        <label class="field"><span class="field-label">Подсказка одним словом</span><input id="cn-clue-word" placeholder="Вода" type="text" maxlength="40" required autocomplete="off"></label>
+        <span class="cn-clue-separator" aria-hidden="true">—</span>
+        <label class="field"><span class="field-label">Сколько слов</span><input id="cn-clue-count" type="number" min="0" max="9" step="1" value="1" required aria-label="Сколько слов"></label>
+        <button class="btn btn-primary" type="submit">Передать подсказку</button>
+      </form>
+      <button id="cn-end-turn" class="btn btn-secondary" hidden>Завершить ход</button>
+      <p id="cn-error" class="error-text" role="alert" hidden></p>
+      <details class="cn-rules"><summary>Как играть</summary><p>Капитан даёт одно слово и число. Агенты открывают карточки по одной: своя позволяет продолжать, чужая или мирный житель завершают ход. Убийца — немедленное поражение. Найдите всех своих агентов раньше соперника.</p><p>Обычно доступно число + 1 попыток. Подсказки 0 и ∞ разрешают неограниченные попытки, пока ответы верны. До завершения хода нужно открыть хотя бы одну карточку. Подсказки должны относиться к смыслу слов; однокоренные слова и иные спорные подсказки оценивают сами игроки.</p></details>
+      <div id="cn-history"></div>
+    </div>
+  </section>
+
   <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
   <section id="screen-finished" class="screen">
     <div class="finished-wrap">
@@ -315,6 +340,8 @@
       </div>
       <p id="finished-wait-hint" class="hint-text" hidden>Ждём хоста…</p>
     </div>
+
+    <div id="codenames-finished-report" class="finished-report" hidden></div>
 
     <!-- слова и ассоциации по раундам — видно сразу, без переключателей -->
     <div id="finished-report" class="finished-report">
@@ -411,6 +438,7 @@
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="codenames.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

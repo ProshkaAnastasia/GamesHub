@@ -3,10 +3,12 @@
 // сюда одной строкой; ни Room, ни server.js трогать для этого не нужно.
 const decoder = require('./decoder');
 const ttr = require('./ttr');
+const codenames = require('./codenames');
 
 const GAME_MODULES = {
   [decoder.id]: decoder,
   [ttr.id]: ttr,
+  [codenames.id]: codenames,
 };
 
 const DEFAULT_GAME_TYPE = decoder.id;
