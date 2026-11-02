@@ -57,10 +57,10 @@ function freshTeamState() {
   };
 }
 
-// особый случай на троих: у одной команды 2 игрока (играют как обычно),
-// у другой — 1 (только перехватывает, свой код не загадывает)
-function isDuoVsSoloSizes(sizes) {
-  return sizes.includes(2) && sizes.includes(1);
+// В лобби общий игрок занимает отдельный слот AB, в партии входит в обе команды.
+function isSharedSetup(teamOrder) {
+  return ['A', 'B', 'AB'].every(t => (teamOrder[t] || []).length === 1)
+    && new Set(['A', 'B', 'AB'].flatMap(t => teamOrder[t])).size === 3;
 }
 
 class DecoderGame {
@@ -78,36 +78,36 @@ class DecoderGame {
     this.tiebreak = null;
     this.winner = null;
     this.winReason = null;
-    this.loneTeam = null;
+    this.loneTeam = null; // только для восстановления старого режима 2 против 1
+    this.sharedPlayerId = null;
     this.finished = false;
   }
 
-  static canStart(teamOrder) {
-    const sizes = TEAMS.map(t => (teamOrder[t] || []).length);
-    const normal = sizes.every(s => s >= 2 && s <= 4);
-    return normal || isDuoVsSoloSizes(sizes);
+  static canStart(teamOrder, players) {
+    const count = [...(players?.values() || [])].filter(p => p.connected).length;
+    return count >= 3 && count <= 8;
+  }
+
+  static assignTeams(players) {
+    const ids = shuffle([...players.values()].filter(p => p.connected).map(p => p.id));
+    const order = ids.length === 3
+      ? { A: [ids[0]], B: [ids[1]], AB: [ids[2]] }
+      : { A: ids.slice(0, Math.ceil(ids.length / 2)), B: ids.slice(Math.ceil(ids.length / 2)) };
+    for (const player of players.values()) {
+      player.team = Object.keys(order).find(t => order[t].includes(player.id)) || null;
+      player.role = player.team ? 'player' : 'spectator';
+    }
+    return order;
   }
 
   static create(players, teamOrder, usedWords) {
     const game = new DecoderGame(players, teamOrder, usedWords);
-    game.loneTeam = TEAMS.find(t =>
-      (teamOrder[t] || []).length === 1 && (teamOrder[OTHER[t]] || []).length === 2
-    ) || null;
-
-    const neededWords = game.loneTeam ? 4 : 8;
-    if (usedWords.size + neededWords > WORDS.length) usedWords.clear();
-    if (game.loneTeam) {
-      const wordTeam = OTHER[game.loneTeam];
-      const { teamA } = drawTeamWords(4, usedWords);
-      teamA.forEach(w => usedWords.add(w));
-      game.teams[wordTeam].words = teamA;
-      game.teams[game.loneTeam].words = [];
-    } else {
-      const { teamA, teamB } = drawTeamWords(4, usedWords);
-      [...teamA, ...teamB].forEach(w => usedWords.add(w));
-      game.teams.A.words = teamA;
-      game.teams.B.words = teamB;
-    }
+    game.sharedPlayerId = isSharedSetup(teamOrder) ? teamOrder.AB[0] : null;
+    if (usedWords.size + 8 > WORDS.length) usedWords.clear();
+    const { teamA, teamB } = drawTeamWords(4, usedWords);
+    [...teamA, ...teamB].forEach(w => usedWords.add(w));
+    game.teams.A.words = teamA;
+    game.teams.B.words = teamB;
 
     game.startRound();
     return game;
@@ -124,6 +124,7 @@ class DecoderGame {
     game.winner = data.winner;
     game.winReason = data.winReason;
     game.loneTeam = data.loneTeam || null;
+    game.sharedPlayerId = data.sharedPlayerId || null;
     game.finished = !!data.finished;
     return game;
   }
@@ -139,6 +140,7 @@ class DecoderGame {
       winner: this.winner,
       winReason: this.winReason,
       loneTeam: this.loneTeam,
+      sharedPlayerId: this.sharedPlayerId,
       finished: this.finished,
     };
   }
@@ -180,7 +182,22 @@ class DecoderGame {
     });
   }
 
+  getTeamOrder(team) {
+    const order = this.teamOrder[team] || [];
+    return this.sharedPlayerId ? [...order, this.sharedPlayerId] : order;
+  }
+
+  getPlayerTeam(playerId) {
+    if (playerId !== this.sharedPlayerId) return this.players.get(playerId)?.team;
+    const encryptingTeam = this.round % 2 ? 'A' : 'B';
+    return this.phase === 'clue-giving' ? encryptingTeam : OTHER[encryptingTeam];
+  }
+
   getEncryptorId(team) {
+    if (this.sharedPlayerId) {
+      const sharedEncrypts = team === (this.round % 2 ? 'A' : 'B');
+      return sharedEncrypts ? this.sharedPlayerId : this.teamOrder[team][0];
+    }
     const order = this.teamOrder[team] || [];
     const idx = this.teams[team].encryptorIndex;
     if (idx < 0 || !order.length) return null;
@@ -192,7 +209,7 @@ class DecoderGame {
   // - на отгадывании критично, если в команде осталось меньше 2 онлайн-игроков
   //   (шифровальщик не может разгадывать свой же код, так что одного оставшегося недостаточно)
   teamBlockedInfo(teamKey) {
-    const order = this.teamOrder[teamKey] || [];
+    const order = this.getTeamOrder(teamKey);
     const members = order.map(pid => this.players.get(pid)).filter(Boolean);
     const encryptorId = this.getEncryptorId(teamKey);
     const team = this.teams[teamKey];
@@ -228,9 +245,10 @@ class DecoderGame {
     const player = this.players.get(playerId);
     if (!player || !player.team) return { safe: true, reason: null };
 
-    const team = this.teams[player.team];
-    const encryptorId = this.getEncryptorId(player.team);
-    const order = this.teamOrder[player.team] || [];
+    const playerTeam = this.getPlayerTeam(playerId);
+    const team = this.teams[playerTeam];
+    const encryptorId = this.getEncryptorId(playerTeam);
+    const order = this.getTeamOrder(playerTeam);
 
     if (this.phase === 'clue-giving' && team.current && !team.current.clues) {
       if (playerId === encryptorId) {
@@ -253,7 +271,8 @@ class DecoderGame {
   }
 
   submitClues(playerId, clues) {
-    const player = this.players.get(playerId);
+    const storedPlayer = this.players.get(playerId);
+    const player = storedPlayer && { ...storedPlayer, team: this.getPlayerTeam(playerId) };
     if (!player || !player.team) return { error: 'Вы не в команде' };
     if (this.phase !== 'clue-giving') return { error: 'Сейчас не время подсказок' };
     const team = this.teams[player.team];
@@ -274,13 +293,16 @@ class DecoderGame {
   }
 
   updateGuessDraft(playerId, kind, guess) {
-    const player = this.players.get(playerId);
+    const storedPlayer = this.players.get(playerId);
+    const player = storedPlayer && { ...storedPlayer, team: this.getPlayerTeam(playerId) };
     if (!player || !player.team) return { error: 'Вы не в команде' };
     if (this.phase !== 'guessing') return { error: 'Сейчас не время догадок' };
+    if (kind === 'intercept' && playerId === this.sharedPlayerId) return { error: 'Общий игрок не участвует в перехватах' };
     if (kind === 'own' && playerId === this.getEncryptorId(player.team)) {
       return { error: 'Шифровальщик не разгадывает свой же код' };
     }
     const myTeam = this.teams[player.team];
+    if (!Array.isArray(guess) || guess.length !== 3) return { error: 'Нужно 3 цифры' };
     const cleaned = [0, 1, 2].map(i => {
       const v = guess[i];
       return (v === null || v === undefined || v === '') ? null : Number(v);
@@ -298,15 +320,18 @@ class DecoderGame {
   }
 
   lockGuess(playerId, kind) {
-    const player = this.players.get(playerId);
+    const storedPlayer = this.players.get(playerId);
+    const player = storedPlayer && { ...storedPlayer, team: this.getPlayerTeam(playerId) };
     if (!player || !player.team) return { error: 'Вы не в команде' };
     if (this.phase !== 'guessing') return { error: 'Сейчас не время догадок' };
+    if (kind === 'intercept' && playerId === this.sharedPlayerId) return { error: 'Общий игрок не участвует в перехватах' };
     if (kind === 'own' && playerId === this.getEncryptorId(player.team)) {
       return { error: 'Шифровальщик не подтверждает разгадку своего же кода' };
     }
     const myTeam = this.teams[player.team];
+    if (!['own', 'intercept'].includes(kind)) return { error: 'Неверный тип ответа' };
     const guessArr = kind === 'own' ? myTeam.current.ownGuess : myTeam.current.interceptGuess;
-    if (guessArr.some(v => v === null) || new Set(guessArr).size !== 3) {
+    if (guessArr.some(v => !Number.isInteger(v) || v < 1 || v > 4) || new Set(guessArr).size !== 3) {
       return { error: 'Выберите 3 разные цифры от 1 до 4' };
     }
     if (kind === 'own') myTeam.current.ownLocked = true;
@@ -448,8 +473,10 @@ class DecoderGame {
   }
 
   updateTiebreakGuess(playerId, words) {
-    const player = this.players.get(playerId);
+    const storedPlayer = this.players.get(playerId);
+    const player = storedPlayer && { ...storedPlayer, team: this.getPlayerTeam(playerId) };
     if (!player || !player.team) return { error: 'Вы не в команде' };
+    if (playerId === this.sharedPlayerId) return { error: 'Общий игрок знает слова обеих команд и не участвует в тай-брейке' };
     if (this.phase !== 'tiebreak') return { error: 'Сейчас не тай-брейк' };
     if (this.tiebreak.locked[player.team]) return { error: 'Ответ вашей команды уже подтверждён' };
     if (!Array.isArray(words) || words.length !== 4) return { error: 'Нужно 4 слова' };
@@ -458,8 +485,10 @@ class DecoderGame {
   }
 
   lockTiebreakGuess(playerId) {
-    const player = this.players.get(playerId);
+    const storedPlayer = this.players.get(playerId);
+    const player = storedPlayer && { ...storedPlayer, team: this.getPlayerTeam(playerId) };
     if (!player || !player.team) return { error: 'Вы не в команде' };
+    if (playerId === this.sharedPlayerId) return { error: 'Общий игрок знает слова обеих команд и не участвует в тай-брейке' };
     if (this.phase !== 'tiebreak') return { error: 'Сейчас не тай-брейк' };
     if (this.tiebreak.locked[player.team]) return { error: 'Ответ уже подтверждён' };
     const guess = this.tiebreak.guesses[player.team];
@@ -512,6 +541,7 @@ class DecoderGame {
   getArchiveSummary() {
     return {
       loneTeam: this.loneTeam,
+      sharedPlayerId: this.sharedPlayerId,
       teams: {
         A: {
           words: this.teams.A.words,
@@ -533,13 +563,15 @@ class DecoderGame {
   // строит игровую часть персонального представления для конкретного
   // игрока — Room примешивает это к общим полям комнаты (код, статус, чат…)
   viewFor(playerId) {
-    const me = this.players.get(playerId);
+    const storedPlayer = this.players.get(playerId);
+    const me = storedPlayer && { ...storedPlayer, team: this.getPlayerTeam(playerId) };
     const base = {
       round: this.round,
       phase: this.phase,
       clueDeadline: this.phase === 'clue-giving' ? this.clueDeadline : null,
       revealDeadline: this.phase === 'reveal' ? this.revealDeadline : null,
       loneTeam: this.loneTeam,
+      sharedPlayerId: this.sharedPlayerId,
       winner: this.winner,
       winReason: this.winReason,
       scoreboard: {
@@ -557,6 +589,8 @@ class DecoderGame {
 
     const teamView = {
       myTeamKey: me.team,
+      isSharedPlayer: playerId === this.sharedPlayerId,
+      sharedWords: playerId === this.sharedPlayerId ? { A: this.teams.A.words, B: this.teams.B.words } : null,
       myWords: myTeam.words,
       // слова соперника — секрет, пока игра не окончена; на финальном
       // экране прятать их больше не от кого
@@ -575,7 +609,7 @@ class DecoderGame {
       } : null,
       ownGuess: myTeam.current ? myTeam.current.ownGuess : null,
       ownLocked: myTeam.current ? myTeam.current.ownLocked : false,
-      interceptGuess: myTeam.current ? myTeam.current.interceptGuess : null,
+      interceptGuess: playerId !== this.sharedPlayerId && myTeam.current ? myTeam.current.interceptGuess : null,
       interceptLocked: myTeam.current ? myTeam.current.interceptLocked : false,
       oppSubmittedClues: !!(oppTeam.current && oppTeam.current.clues),
       mySubmittedClues: !!(myTeam.current && myTeam.current.clues),
@@ -614,7 +648,10 @@ module.exports = {
   id: 'decoder',
   label: 'Декодер',
   teamKeys: TEAMS,
-  startRequirementText: 'Нужно от 2 до 4 игроков в каждой команде (либо 2 и 1 — втроём)',
+  sharedTeamKey: 'AB',
+  autoAssignTeams: true,
+  assignTeams: DecoderGame.assignTeams,
+  startRequirementText: 'Нужно от 3 до 8 игроков онлайн. Команды и общий игрок выбираются случайно при старте',
   REVEAL_TIME_MS,
   canStart: DecoderGame.canStart,
   create: DecoderGame.create,

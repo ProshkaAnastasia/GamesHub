@@ -77,7 +77,7 @@ class Room {
     // если игра ещё в лобби — удаляем совсем
     if (this.status === 'lobby') {
       this.players.delete(id);
-      (this.module?.teamKeys || []).forEach(t => {
+      [...(this.module?.teamKeys || []), this.module?.sharedTeamKey].filter(Boolean).forEach(t => {
         this.teamOrder[t] = (this.teamOrder[t] || []).filter(pid => pid !== id);
       });
     }
@@ -149,7 +149,8 @@ class Room {
 
   setTeam(id, team) {
     if (this.status !== 'lobby') return { error: 'Игра уже началась' };
-    const teamKeys = this.module?.teamKeys || [];
+    if (this.module?.autoAssignTeams) return { error: 'Команды распределяются случайно при старте' };
+    const teamKeys = [...(this.module?.teamKeys || []), this.module?.sharedTeamKey].filter(Boolean);
     if (!teamKeys.includes(team)) return { error: 'Неверная команда' };
     const player = this.players.get(id);
     if (!player) return { error: 'Игрок не найден' };
@@ -189,6 +190,7 @@ class Room {
     if (!Module.canStart(this.teamOrder, this.players)) {
       return { error: Module.startRequirementText || 'Недостаточно игроков для этого режима' };
     }
+    if (Module.assignTeams) this.teamOrder = Module.assignTeams(this.players);
     this.game = Module.create(this.players, this.teamOrder, this.usedWords);
     this.status = 'playing';
     return { ok: true };
@@ -259,6 +261,10 @@ class Room {
     });
     this.game = null;
     this.status = 'lobby';
+    if (this.module?.autoAssignTeams) {
+      this.teamOrder = {};
+      this.players.forEach(p => { p.team = null; });
+    }
     return { ok: true };
   }
 

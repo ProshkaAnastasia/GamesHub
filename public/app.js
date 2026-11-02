@@ -359,7 +359,7 @@
     const gameChosen = !!view.gameType;
     const pendingHint = $('#game-type-pending-hint');
     const currentModule = (view.availableGameTypes || []).find(t => t.id === view.gameType);
-    const hasTeams = !!(currentModule?.teamKeys?.length);
+    const hasTeams = !!(currentModule?.teamKeys?.length) && !currentModule.autoAssignTeams;
     $('#teams-section').hidden = !gameChosen;
     pendingHint.hidden = gameChosen;
     if (!gameChosen) {
@@ -375,10 +375,12 @@
     // остаётся null, никто его в таких играх не выставляет)
     $('.teams-grid').hidden = !hasTeams;
 
-    const byTeam = { A: [], B: [], none: [] };
+    const byTeam = { A: [], B: [], AB: [], none: [] };
     view.players.forEach(p => {
-      if (p.team === 'A') byTeam.A.push(p);
+      if (!hasTeams) byTeam.none.push(p);
+      else if (p.team === 'A') byTeam.A.push(p);
       else if (p.team === 'B') byTeam.B.push(p);
+      else if (p.team === 'AB') byTeam.AB.push(p);
       else byTeam.none.push(p);
     });
 
@@ -403,7 +405,7 @@
     startBtn.hidden = !isHost;
     startBtn.disabled = !view.canStart;
     $('#lobby-status').textContent = view.canStart
-      ? (isHost ? 'Можно начинать!' : 'Хост может начинать игру')
+      ? ((isHost ? 'Можно начинать!' : 'Хост может начинать игру') + (currentModule?.autoAssignTeams ? ' Команды распределятся случайно.' : ''))
       : (currentModule?.startRequirementText || 'Недостаточно игроков');
   }
 
@@ -445,6 +447,7 @@
     $('#roster-row').innerHTML = view.players.map(p => `
       <span class="roster-chip team-${(p.team || '').toLowerCase()} ${p.connected ? '' : 'offline'}">
         <span class="dot"></span>${escapeHtml(p.name)}${p.connected ? '' : ' (офлайн)'}
+        ${p.team === 'AB' ? '<span class="player-tag-host">общий игрок</span>' : ''}
         ${p.role === 'spectator' ? '<span class="player-tag-spectator">зритель</span>' : ''}
       </span>
     `).join('');
@@ -477,6 +480,17 @@
         <span class="slot-word">${escapeHtml(w)}</span>
       </div>
     `).join('');
+
+    $('#my-words-terminal .terminal-label').textContent = tv.isSharedPlayer
+      ? `Слова команды ${tv.myTeamKey === 'A' ? 'А' : 'Б'} — сейчас вы ${view.phase === 'clue-giving' ? 'шифруете' : view.phase === 'guessing' ? 'разгадываете' : 'смотрите результат'}`
+      : 'Слова вашей команды';
+    $('#shared-role-hint').hidden = !tv.isSharedPlayer;
+    $('#shared-role-hint').textContent = tv.isSharedPlayer
+      ? 'Вы общий игрок: шифруете для одной команды и разгадываете код другой. Перехваты и тай-брейк выполняют игроки А и Б.' : '';
+    if (tv.sharedWords) {
+      const other = tv.myTeamKey === 'A' ? 'B' : 'A';
+      $('#word-slots').insertAdjacentHTML('beforeend', `<div class="hint-text">Слова команды ${other === 'A' ? 'А' : 'Б'}: ${tv.sharedWords[other].map((w, i) => `${i + 1}. ${escapeHtml(w)}`).join(' · ')}</div>`);
+    }
 
     $all('.phase-panel').forEach(p => p.classList.remove('active'));
 
@@ -588,7 +602,7 @@
     // соло-команде нечего расшифровывать у себя; команде из двух нечего
     // перехватывать у соло-соперника — прячем неактуальную половину панели
     $('#guess-board-own').hidden = isLoneMe;
-    $('#guess-board-intercept').hidden = oppIsLone;
+    $('#guess-board-intercept').hidden = oppIsLone || tv.isSharedPlayer;
 
     ownGuessDraft = tv.ownGuess ? [...tv.ownGuess] : [null, null, null];
     interceptGuessDraft = tv.interceptGuess ? [...tv.interceptGuess] : [null, null, null];
@@ -754,7 +768,10 @@
 
     resultEl.hidden = true;
 
-    if (tb.myLocked) {
+    $('#tiebreak-waiting p').textContent = tv.isSharedPlayer
+      ? 'Вы знаете слова обеих команд. Ждём ответы игроков А и Б…'
+      : 'Ответ подтверждён. Ждём соперника…';
+    if (tb.myLocked || tv.isSharedPlayer) {
       formWrap.hidden = true;
       waiting.hidden = false;
       return;
@@ -1060,7 +1077,7 @@
   }
 
   function renderGameDetail(view, game) {
-    const perspectiveTeam = (view.me && view.me.team) || 'A';
+    const perspectiveTeam = view.me?.team === 'B' ? 'B' : 'A';
     const pastTv = buildPastGameTv(game, perspectiveTeam);
     const pastView = { loneTeam: game.loneTeam };
 
@@ -1095,7 +1112,7 @@
     const won = isTtr ? (view.winner === view.me?.id) : (!isDraw && view.me?.team && view.winner === view.me.team);
     $('#finished-title').textContent = isDraw
       ? 'Ничья! 🤝'
-      : won ? 'Победа! 🎉' : (isTtr || !view.me?.team ? 'Игра окончена' : 'Поражение');
+      : won ? 'Победа! 🎉' : (isTtr || !view.me?.team || view.me.team === 'AB' ? 'Игра окончена' : 'Поражение');
     $('#finished-reason').textContent = view.winReason || '';
     const isHost = view.me?.isHost;
     $('#btn-play-again').hidden = !isHost;

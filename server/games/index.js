@@ -18,6 +18,7 @@ const GAME_LIST = Object.values(GAME_MODULES).map(m => ({
   id: m.id,
   label: m.label,
   teamKeys: m.teamKeys,
+  autoAssignTeams: !!m.autoAssignTeams,
   startRequirementText: m.startRequirementText,
 }));
 
