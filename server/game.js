@@ -101,7 +101,19 @@ class Room {
 
   setConnected(id, connected) {
     const player = this.players.get(id);
-    if (player) player.connected = connected;
+    if (player) {
+      if (!connected && player.connected) player.disconnectedAt = Date.now();
+      player.connected = connected;
+      if (connected) delete player.disconnectedAt;
+    }
+  }
+
+  expireOfflineLobbyPlayers(now, timeoutMs) {
+    if (this.status !== 'lobby') return false;
+    const expired = [...this.players.values()].filter(p => !p.connected
+      && Number.isFinite(p.disconnectedAt) && now - p.disconnectedAt >= timeoutMs);
+    expired.forEach(p => this.removePlayer(p.id));
+    return expired.length > 0;
   }
 
   // чат работает в любой момент жизни комнаты (лобби/игра/финал), не
@@ -368,7 +380,7 @@ class Room {
     room.hostId = data.hostId;
     // после перезапуска ни у кого ещё нет живого сокета — все офлайн,
     // пока не переподключатся (клиент делает это автоматически по clientId)
-    room.players = new Map((data.players || []).map(p => [p.id, { ...p, connected: false }]));
+    room.players = new Map((data.players || []).map(p => [p.id, { ...p, connected: false, disconnectedAt: p.connected ? Date.now() : (p.disconnectedAt ?? Date.now()) }]));
     room.status = data.status;
     // отличаем «явно ещё не выбрана» (null, сохранён этой веткой кода) от
     // «поля вообще не было» (комнаты, сохранённые до этой фичи) — иначе
@@ -410,10 +422,14 @@ class RoomManager {
   findPublicRoom(gameType) {
     const module = GAME_MODULES[gameType];
     if (!module) return null;
-    const waiting = [...this.rooms.values()].filter(room => room.visibility === 'public'
-      && room.status === 'lobby' && room.gameType === gameType
-      && [...room.players.values()].filter(p => p.connected).length < module.maxPlayers);
-    return waiting.length ? waiting[Math.floor(Math.random() * waiting.length)] : null;
+    const waiting = [...this.rooms.values()]
+      .filter(room => room.visibility === 'public' && room.status === 'lobby' && room.gameType === gameType)
+      .map(room => ({ room, online: [...room.players.values()].filter(p => p.connected).length }))
+      .filter(candidate => candidate.online < module.maxPlayers)
+      // Fill an occupied lobby before reusing empty ones; stable ties keep arrivals together.
+      .sort((a, b) => b.online - a.online || a.room.createdAt - b.room.createdAt
+        || a.room.code.localeCompare(b.room.code));
+    return waiting[0]?.room || null;
   }
 
   get(code) {

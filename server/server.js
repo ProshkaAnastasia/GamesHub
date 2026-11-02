@@ -482,7 +482,7 @@ function handleDisconnect(socket) {
   const room = manager.get(s.roomCode);
   if (!room || hasConnection(s.roomCode, s.playerId)) return;
 
-  // Потеря связи не удаляет игрока и не ограничивает время возвращения.
+  // В активной партии время возвращения не ограничено; лобби очищается отдельно.
   room.setConnected(s.playerId, false);
   broadcastRoom(room);
 
@@ -503,6 +503,14 @@ for (const room of manager.rooms.values()) {
     }
   }
 }
+
+// Clean only waiting rooms. setConnected tracks the last socket, including multiple tabs.
+setInterval(() => {
+  const now = Date.now();
+  for (const room of manager.rooms.values()) {
+    if (room.expireOfflineLobbyPlayers(now, config.lobbyOfflineTimeoutMs)) broadcastRoom(room);
+  }
+}, 5000).unref();
 
 server.listen(PORT, () => {
   console.log(`Декодер запущен на порту ${server.address().port}`);

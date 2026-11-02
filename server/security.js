@@ -14,6 +14,7 @@ function readConfig(env = process.env) {
     origins, secureCookie: env.COOKIE_SECURE === 'true',
     publicRooms: env.PUBLIC_ROOM_LIST === 'true',
     matchStartDelayMs: positiveInt(env.MATCH_START_DELAY_MS, 15000),
+    lobbyOfflineTimeoutMs: positiveInt(env.LOBBY_OFFLINE_TIMEOUT_MS, 120000),
     maxRooms: positiveInt(env.MAX_ROOMS, 500),
     maxConnections: positiveInt(env.MAX_CONNECTIONS, 200),
     eventsPerMinute: positiveInt(env.EVENTS_PER_MINUTE, 180),
