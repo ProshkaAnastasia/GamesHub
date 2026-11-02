@@ -33,15 +33,6 @@ function arraysEqual(a, b) {
   return a.every((v, i) => v === b[i]);
 }
 
-// если команда сама не расшифровала свой код И соперник её не перехватил —
-// никто не подтвердил верную последовательность, поэтому сопернику код не
-// показываем, только то, что попытка перехвата не удалась
-function redactCodeIfUnknown(entry) {
-  if (!entry) return entry;
-  const codeConfirmed = entry.ownCorrect || entry.interceptCorrect;
-  return codeConfirmed ? entry : { ...entry, code: null };
-}
-
 function labelTeam(t) {
   return t === 'A' ? 'А' : 'Б';
 }
@@ -614,15 +605,14 @@ class DecoderGame {
       mySubmittedClues: !!(myTeam.current && myTeam.current.clues),
       oppOwnLocked: oppTeam.current ? oppTeam.current.ownLocked : false,
       oppInterceptLocked: oppTeam.current ? oppTeam.current.interceptLocked : false,
-      // игра окончена — прятать больше нечего и незачем, отдаём полную
-      // историю соперника как есть (реальные коды каждого раунда)
+      // После завершения раунда обе команды видят настоящий код.
       history: {
         mine: myTeam.history,
-        opponent: this.finished ? oppTeam.history : oppTeam.history.map(redactCodeIfUnknown),
+        opponent: oppTeam.history,
       },
       lastReveal: this.phase === 'reveal' ? {
         mine: myTeam.history[myTeam.history.length - 1],
-        opponent: redactCodeIfUnknown(oppTeam.history[oppTeam.history.length - 1]),
+        opponent: oppTeam.history[oppTeam.history.length - 1],
       } : null,
       // тай-брейк: до подтверждения обеих команд слова соперника не видны —
       // отдаём только черновик СВОЕЙ команды и статус блокировки соперника

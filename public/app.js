@@ -663,7 +663,7 @@
   });
 
   function digitChips(guess, allCorrect) {
-    return guess.map(g => `<span class="digit-chip ${allCorrect ? 'match' : 'miss'}">${g}</span>`).join('');
+    return guess.map(g => `<span class="digit-chip ${allCorrect === null ? '' : allCorrect ? 'match' : 'miss'}">${g}</span>`).join('');
   }
 
   function renderReveal(view, tv) {
@@ -713,6 +713,10 @@
       return `
         <div class="reveal-team team-${key.toLowerCase()}">
           ${head}
+          <div class="reveal-line">
+            <span class="reveal-line-label">Настоящий код</span>
+            <span class="digit-row">${digitChips(r.code, true)}</span>
+          </div>
           <div class="reveal-line">
             <span class="reveal-line-label">Своя расшифровка</span>
             <span class="digit-row">${digitChips(r.ownGuess, r.ownCorrect)}</span>
@@ -905,16 +909,19 @@
                 <span>Команда ${key === 'A' ? 'А' : 'Б'}</span>
               </div>
               ${isLoneTeam ? '' : `<div class="h-clues">${(h.clues || []).map(escapeHtml).join(' · ')}</div>`}
+              <div class="h-code-head" aria-hidden="true"><span></span><span>Версия</span><span>Результат</span></div>
               ${isLoneTeam ? '' : `
-                <div class="h-line">
+                <div class="h-line h-code-line">
                   <span class="h-line-label">Своя расшифровка</span>
-                  <span class="digit-row">${digitChips(h.ownGuess, h.ownCorrect)}</span>
+                  <span class="digit-row" aria-label="Предположение команды">${digitChips(h.ownGuess, h.ownCorrect)}</span>
+                  <span class="digit-row" aria-label="Настоящий код своей команды">${h.code ? digitChips(h.code, null) : '—'}</span>
                 </div>
               `}
               ${isDuoVsSoloOpponent ? '' : `
-                <div class="h-line">
+                <div class="h-line h-code-line">
                   <span class="h-line-label">Перехват соперника</span>
-                  <span class="digit-row">${interceptGuess ? digitChips(interceptGuess, weIntercepted) : '<span class="assoc-empty">—</span>'}</span>
+                  <span class="digit-row" aria-label="Предположение перехвата">${interceptGuess ? digitChips(interceptGuess, weIntercepted) : '<span class="assoc-empty">—</span>'}</span>
+                  <span class="digit-row" aria-label="Настоящий код соперника">${otherH?.code ? digitChips(otherH.code, null) : '—'}</span>
                 </div>
               `}
             </div>
@@ -930,7 +937,7 @@
   function buildAssocRows(history) {
     return [...history].sort((a, b) => a.round - b.round).map(h => {
       const bySlot = [null, null, null, null];
-      // код мог быть скрыт (никто его не подтвердил в этом раунде) —
+      // В старом соло-режиме у перехватчика нет собственного кода —
       // тогда мы не знаем, какая подсказка к какому слову относилась
       if (h.code) h.code.forEach((wordNum, i) => { bySlot[wordNum - 1] = h.clues[i]; });
       return { round: h.round, bySlot };

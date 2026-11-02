@@ -1597,7 +1597,9 @@ h1 {
 .match-game-option input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .resume-room { margin-bottom: 10px; }
-.offline-actions { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.offline-actions { margin: 12px 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); }
+.offline-actions:not([hidden]) { display: grid; gap: 20px; }
+.offline-actions > .hint-text { margin: 0; min-width: 0; line-height: 1.5; overflow-wrap: break-word; }
 
 @media (max-width: 360px) {
   .match-game-picker { grid-template-columns: minmax(0, 1fr); }
@@ -1617,3 +1619,11 @@ h1 {
   #screen-game .score-pill { padding: 6px 8px; gap: 6px; }
   #screen-game .round-indicator { white-space: nowrap; }
 }
+
+.h-code-head, .h-line.h-code-line {
+  display: grid; grid-template-columns: minmax(0, 1fr) 74px 74px;
+  align-items: center; gap: 10px;
+}
+.h-code-head { margin-top: 10px; color: var(--text-muted); font-size: 10px; text-align: center; }
+.h-line.h-code-line { margin-top: 10px; }
+.h-code-line .h-line-label { min-width: 0; }

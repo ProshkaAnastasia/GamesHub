@@ -198,3 +198,30 @@ test('manual team selection is rejected and two online players cannot start', ()
   assert.equal(room.canStart(), false);
   assert.ok(room.startGame().error);
 });
+
+test('actual opponent code is revealed even when both guesses are wrong, and stays in history', () => {
+  const room = setup(false);
+  const game = room.game;
+  const actualA = [...game.teams.A.current.code];
+  const actualB = [...game.teams.B.current.code];
+  assert.equal(room.viewFor('a2').teamView.myCode, null);
+  assert.equal(room.viewFor('a2').teamView.lastReveal, null);
+  assert.deepEqual(room.viewFor('a2').teamView.history.opponent, []);
+  clues(room);
+  answer(room, 'a2', 'own', [...actualA].reverse());
+  answer(room, 'b2', 'own', [...actualB].reverse());
+  answer(room, 'a', 'intercept', [...actualB].reverse());
+  answer(room, 'b', 'intercept', [...actualA].reverse());
+  assert.equal(game.phase, 'reveal');
+  assert.equal(room.status, 'playing');
+  for (const [id, code] of [['a2', actualB], ['b2', actualA]]) {
+    const tv = room.viewFor(id).teamView;
+    assert.equal(tv.lastReveal.opponent.ownCorrect, false);
+    assert.equal(tv.lastReveal.opponent.interceptCorrect, false);
+    assert.deepEqual(tv.lastReveal.opponent.code, code);
+    assert.deepEqual(tv.history.opponent[0].code, code);
+  }
+  room.nextRound();
+  assert.deepEqual(room.viewFor('a2').teamView.history.opponent[0].code, actualB);
+  assert.equal(room.viewFor('a').teamView.myCode, null);
+});
