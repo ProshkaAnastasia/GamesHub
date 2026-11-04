@@ -393,6 +393,20 @@ io.on('connection', (socket) => {
     if (result.ok) broadcastRoom(room);
   });
 
+  for (const [event, method, args] of [
+    ['battleship-layout', 'battleshipArrange', p => [p.ships]],
+    ['battleship-auto', 'battleshipAuto', () => []],
+    ['battleship-ready', 'battleshipReady', () => []],
+    ['battleship-fire', 'battleshipFire', p => [p.index]],
+  ]) onEvent(event, (payload, cb) => {
+    const session = sessions.get(socket.id);
+    const room = session && manager.get(session.roomCode);
+    if (!room || room.gameType !== 'battleship') return cb({ error: 'Сейчас нет партии Морского боя' });
+    const result = room[method](session.playerId, ...args(payload));
+    cb(result);
+    if (result.ok) broadcastRoom(room);
+  });
+
   onEvent('force-end-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);

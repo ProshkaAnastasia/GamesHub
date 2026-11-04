@@ -203,7 +203,7 @@
     const rooms = res.rooms || [];
     wrap.hidden = rooms.length === 0;
     wrap.innerHTML = rooms.map(room => `
-      <button class="btn btn-secondary resume-room" data-code="${escapeHtml(room.code)}">${room.status === 'finished' ? 'Посмотреть завершённую игру' : 'Вернуться в игру'} · ${room.gameType === 'carcassonne' ? 'Каркассон' : room.gameType === 'codenames' ? 'Codenames' : room.gameType === 'ttr' ? 'Ticket to Ride' : room.gameType === 'decoder' ? 'Декодер' : 'Приватная комната'} · ${escapeHtml(room.code)}</button>
+      <button class="btn btn-secondary resume-room" data-code="${escapeHtml(room.code)}">${room.status === 'finished' ? 'Посмотреть завершённую игру' : 'Вернуться в игру'} · ${room.gameType === 'battleship' ? 'Морской бой' : room.gameType === 'carcassonne' ? 'Каркассон' : room.gameType === 'codenames' ? 'Codenames' : room.gameType === 'ttr' ? 'Ticket to Ride' : room.gameType === 'decoder' ? 'Декодер' : 'Приватная комната'} · ${escapeHtml(room.code)}</button>
     `).join('');
     wrap.querySelectorAll('.resume-room').forEach(button => button.addEventListener('click', async () => {
       const result = await emit('rejoin-room', { roomCode: button.dataset.code });
@@ -288,6 +288,8 @@
   $('#btn-leave-game-ttr').addEventListener('click', leaveRoom);
   $('#btn-leave-game-cn').addEventListener('click', leaveRoom);
   $('#btn-leave-game-cc').addEventListener('click', leaveRoom);
+  $('#btn-leave-game-bs').addEventListener('click', leaveRoom);
+  $('#btn-force-end-game-bs').addEventListener('click', forceEndGame);
   $('#btn-force-end-game-cc').addEventListener('click', forceEndGame);
 
   const btnTtrSoundToggle = $('#btn-ttr-sound-toggle');
@@ -315,7 +317,7 @@
   function updateLeaveButtons(view) {
     const safe = view.canLeaveSafely?.safe !== false;
     const reason = view.canLeaveSafely?.reason;
-    [$('#btn-leave-lobby'), $('#btn-leave-game'), $('#btn-leave-game-ttr'), $('#btn-leave-game-cn'), $('#btn-leave-game-cc')].forEach((btn) => {
+    [$('#btn-leave-lobby'), $('#btn-leave-game'), $('#btn-leave-game-ttr'), $('#btn-leave-game-cn'), $('#btn-leave-game-cc'), $('#btn-leave-game-bs')].forEach((btn) => {
       btn.disabled = !safe;
       btn.title = safe ? 'Выйти из комнаты' : reason;
     });
@@ -1078,7 +1080,7 @@
     }
     $('#games-list-content').innerHTML = [...games].reverse().map(g => {
       const isDraw = g.winner === 'draw';
-      const title = g.carcassonne ? (isDraw ? 'Ничья' : `Победа: ${escapeHtml(g.carcassonne.names[g.winner] || '')}`) : g.codenames?.mode === 'duet' ? (g.winner === 'coop-win' ? 'Миссия выполнена' : isDraw ? 'Партия завершена' : 'Миссия провалена') : isDraw ? 'Ничья' : `Победа команды ${g.winner === 'A' ? 'А' : 'Б'}`;
+      const title = g.battleship ? (isDraw ? 'Ничья' : `Победа: ${escapeHtml(g.battleship.names[g.winner] || '')}`) : g.carcassonne ? (isDraw ? 'Ничья' : `Победа: ${escapeHtml(g.carcassonne.names[g.winner] || '')}`) : g.codenames?.mode === 'duet' ? (g.winner === 'coop-win' ? 'Миссия выполнена' : isDraw ? 'Партия завершена' : 'Миссия провалена') : isDraw ? 'Ничья' : `Победа команды ${g.winner === 'A' ? 'А' : 'Б'}`;
       const when = new Date(g.finishedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       return `
         <button class="games-list-item" data-game="${g.gameNumber}">
@@ -1096,6 +1098,14 @@
   }
 
   function renderGameDetail(view, game) {
+    if (game.gameType === 'battleship') {
+      $('#games-list-content').hidden = true;
+      $('#games-detail-content').hidden = false;
+      $('#games-detail-title').textContent = `Морской бой — игра ${game.gameNumber}`;
+      window.BattleshipUI.report(game.battleship, '#games-detail-history');
+      $('#games-detail-assoc').innerHTML = '';
+      return;
+    }
     if (game.gameType === 'carcassonne') {
       $('#games-list-content').hidden = true;
       $('#games-detail-content').hidden = false;
@@ -1142,9 +1152,10 @@
 
   // ---------- ЭКРАН: конец игры ----------
   function renderFinished(view) {
+    $('#battleship-finished-report').hidden = view.gameType !== 'battleship';
     $('#carcassonne-finished-report').hidden = view.gameType !== 'carcassonne';
     $('#codenames-finished-report').hidden = view.gameType !== 'codenames';
-    const isTtr = view.gameType === 'ttr' || view.gameType === 'carcassonne';
+    const isTtr = ['ttr', 'carcassonne', 'battleship'].includes(view.gameType);
     const isDraw = view.winner === 'draw';
     const won = isTtr ? (view.winner === view.me?.id) : (!isDraw && view.me?.team && view.winner === view.me.team);
     $('#finished-title').textContent = isDraw
@@ -1164,6 +1175,13 @@
         : 'Ждём хоста…';
     }
 
+    if (view.gameType === 'battleship') {
+      $('#finished-report').hidden = true;
+      $('#ttr-finished-report').hidden = true;
+      $('#btn-toggle-history-finished').hidden = true;
+      window.BattleshipUI.report(view.battleship, '#battleship-finished-report');
+      return;
+    }
     if (view.gameType === 'carcassonne') {
       $('#finished-report').hidden = true;
       $('#ttr-finished-report').hidden = true;
@@ -2633,6 +2651,9 @@
       $('#history-panel').hidden = true;
       showScreen('lobby');
       renderLobby(view);
+    } else if (view.status === 'playing' && view.gameType === 'battleship') {
+      showScreen('game-battleship');
+      window.BattleshipUI.render(view, emit);
     } else if (view.status === 'playing' && view.gameType === 'carcassonne') {
       showScreen('game-carcassonne');
       window.CarcassonneUI.render(view, emit);

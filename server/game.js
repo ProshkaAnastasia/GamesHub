@@ -253,6 +253,11 @@ class Room {
   updateTiebreakGuess(playerId, words) { return this._delegate('updateTiebreakGuess', playerId, words); }
   lockTiebreakGuess(playerId) { return this._delegate('lockTiebreakGuess', playerId); }
 
+  battleshipArrange(id, ships) { return this._delegate('arrange', id, ships); }
+  battleshipAuto(id) { return this._delegate('autoArrange', id); }
+  battleshipReady(id) { return this._delegate('readyFleet', id); }
+  battleshipFire(id, index) { return this._delegate('fire', id, index); }
+
   carcassonneTile(playerId, x, y, rotation) { return this._delegate('placeTile', playerId, x, y, rotation); }
   carcassonneMeeple(playerId, feature) { return this._delegate('placeMeeple', playerId, feature); }
 

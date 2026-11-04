@@ -1782,3 +1782,38 @@ h1 {
 #cc-preview { position: relative; aspect-ratio: 1; }
 .cc-tile-art { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 4px; }
 .cc-tile .cc-figures, #cc-preview .cc-figures { position: absolute; inset: 0; pointer-events: none; }
+
+/* Battleship uses a compact chart and CSS ships, with no image assets. */
+#screen-game-battleship .game-topbar, .bs-wrap { max-width: 1000px; }
+#screen-game-battleship .game-topbar > strong { margin-right: auto; font-family: var(--font-display); }
+.bs-status { margin: 16px 0 24px; }
+.bs-boards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+.bs-sea { min-width: 0; }
+.bs-sea h3 { margin-bottom: 8px; }
+.bs-sea > p { margin-bottom: 14px; }
+.bs-grid { display: grid; grid-template-columns: 24px repeat(10, minmax(0, 1fr)); gap: 3px; }
+.bs-axis { display: flex; justify-content: center; align-items: center; color: var(--text-muted); font: 12px var(--font-body); }
+.bs-cell { min-width: 0; width: 100%; aspect-ratio: 1; padding: 0; border: 1px solid #31434e; border-radius: 4px; background: #14232d; color: #a5b7c3; font-size: clamp(14px, 2vw, 24px); font-weight: 700; cursor: crosshair; }
+.bs-cell:disabled { opacity: 1; cursor: default; }
+.bs-cell:not(:disabled):hover, .bs-cell:focus-visible { outline: 2px solid #85c9eb; outline-offset: 0; background: #274957; }
+.bs-cell.bs-ship { background: #577b89; border-color: #99c4cd; }
+.bs-cell.bs-hit { background: #8a4539; border-color: #ed9b77; color: #ffe7d3; }
+.bs-cell.bs-sunk { background: repeating-linear-gradient(45deg, #572b2d, #572b2d 4px, #743a3c 4px, #743a3c 8px); border-color: #bd7274; color: #ffe0d3; }
+.bs-cell.bs-miss { background: #18242b; color: #8dabbc; }
+.bs-cell.bs-preview { box-shadow: inset 0 0 0 2px #b5dfdf; }
+.bs-setup { margin: 20px 0; }
+.bs-setup[hidden] { display: none; }
+.bs-fleet-picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+.bs-ship-choice { padding: 12px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text-muted); cursor: pointer; }
+.bs-ship-choice > span { display: block; color: #9cc4d0; letter-spacing: 3px; margin-bottom: 6px; }
+.bs-ship-choice small { font-size: 11px; }
+.bs-ship-choice.selected { border-color: var(--accent); background: #7ce38b12; }
+.bs-ship-choice:disabled { opacity: .4; cursor: default; }
+.bs-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.bs-actions .btn { width: auto; padding: 10px 14px; font-size: 13px; }
+.bs-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 20px 0; color: var(--text-muted); font-size: 12px; }
+.bs-help { position: relative; }
+.bs-help summary { list-style: none; border: 1px solid var(--border); border-radius: 50%; width: 34px; height: 34px; text-align: center; line-height: 32px; cursor: pointer; }
+.bs-help summary::-webkit-details-marker { display: none; }
+.bs-help > div { position: absolute; top: 100%; right: 0; z-index: 40; width: min(420px, calc(100vw - 40px)); max-height: 60vh; overflow: auto; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: #151c21; color: var(--text-muted); font-size: 13px; line-height: 1.6; box-shadow: 0 12px 32px #0008; }
+@media(max-width:680px) { .bs-boards { grid-template-columns: minmax(0, 1fr); gap: 24px; } .bs-grid { gap: 2px; } .bs-help > div { position: fixed; top: 90px; right: 20px; } .bs-ship-choice > span { letter-spacing: 1px; } }

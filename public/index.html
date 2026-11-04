@@ -344,6 +344,18 @@
     </div>
   </section>
 
+  <section id="screen-game-battleship" class="screen">
+    <header class="topbar game-topbar"><strong>Морской бой</strong><details class="bs-help"><summary aria-label="Правила игры">?</summary><div><p>Расставьте 10 кораблей: один на 4 клетки, два на 3, три на 2 и четыре на 1. Корабли не касаются даже углами.</p><p>Выберите длину, поверните корабль и нажмите на своё поле. Нажатие на поставленный корабль убирает его. Можно использовать случайную расстановку. Нажмите «Готов», когда флот расставлен.</p><p>После готовности обоих игроков стреляйте по полю соперника. Попадание даёт ещё один выстрел, промах передаёт ход. Побеждает тот, кто первым потопит весь флот. Клетки вокруг потопленного корабля отмечаются автоматически.</p></div></details><button id="btn-force-end-game-bs" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-bs" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
+    <div class="game-wrap bs-wrap">
+      <div class="offline-actions" hidden><p class="hint-text">Участник офлайн. Можно ждать возвращения или завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>
+      <div class="bs-status"><strong id="bs-status"></strong><p id="bs-last" class="hint-text"></p></div>
+      <div id="bs-setup" class="bs-setup" hidden><div id="bs-fleet-picker" class="bs-fleet-picker" role="group" aria-label="Выберите длину корабля"></div><div class="bs-actions"><button id="bs-rotate" class="btn btn-secondary">↻ Горизонтально</button><button id="bs-auto" class="btn btn-secondary">Случайно</button><button id="bs-clear" class="btn btn-secondary">Очистить</button><button id="bs-ready" class="btn btn-primary">Готов</button></div><p class="hint-text">Выберите корабль и нажмите на клетку своего поля. Нажмите на корабль, чтобы убрать его.</p></div>
+      <p id="bs-error" class="error-text" role="alert" hidden></p>
+      <div id="bs-boards" class="bs-boards"></div>
+      <div class="bs-legend"><span>■ Корабль</span><span>× Попадание</span><span>● Промах</span><span>▧ Потоплен</span></div>
+    </div>
+  </section>
+
   <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
   <section id="screen-finished" class="screen">
     <div class="finished-wrap">
@@ -358,6 +370,7 @@
       <p id="finished-wait-hint" class="hint-text" hidden>Ждём хоста…</p>
     </div>
 
+    <div id="battleship-finished-report" hidden></div>
     <div id="carcassonne-finished-report" hidden></div>
     <div id="codenames-finished-report" class="finished-report" hidden></div>
 
@@ -459,6 +472,7 @@
 <script src="codenames.js"></script>
 <script src="carcassonne-tiles.js"></script>
 <script src="carcassonne.js"></script>
+<script src="battleship.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
