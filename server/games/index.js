@@ -4,11 +4,13 @@
 const decoder = require('./decoder');
 const ttr = require('./ttr');
 const codenames = require('./codenames');
+const carcassonne = require('./carcassonne');
 
 const GAME_MODULES = {
   [decoder.id]: decoder,
   [ttr.id]: ttr,
   [codenames.id]: codenames,
+  [carcassonne.id]: carcassonne,
 };
 
 const DEFAULT_GAME_TYPE = decoder.id;

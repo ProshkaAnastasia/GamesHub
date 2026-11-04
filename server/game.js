@@ -253,6 +253,9 @@ class Room {
   updateTiebreakGuess(playerId, words) { return this._delegate('updateTiebreakGuess', playerId, words); }
   lockTiebreakGuess(playerId) { return this._delegate('lockTiebreakGuess', playerId); }
 
+  carcassonneTile(playerId, x, y, rotation) { return this._delegate('placeTile', playerId, x, y, rotation); }
+  carcassonneMeeple(playerId, feature) { return this._delegate('placeMeeple', playerId, feature); }
+
   codenamesClue(playerId, word, count) { return this._delegate('giveClue', playerId, word, count); }
   codenamesReveal(playerId, index) { return this._delegate('revealCard', playerId, index); }
   codenamesEndTurn(playerId) { return this._delegate('endTurn', playerId); }

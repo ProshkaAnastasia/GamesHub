@@ -331,6 +331,19 @@
     </div>
   </section>
 
+  <section id="screen-game-carcassonne" class="screen">
+    <header class="topbar game-topbar"><strong>Каркассон</strong><details class="cc-help"><summary aria-label="Правила игры">?</summary><div><p>В свой ход поверните плитку и выберите подсвеченное место. Все края должны совпадать.</p><p>Затем можно поставить одного из 7 миплов на свободный объект новой плитки или пропустить. Соединять уже занятые объекты можно; новый мипл на занятый объект не ставится.</p><p>Завершённая дорога: 1 очко за плитку. Город: 2 за плитку и щит. Монастырь: 9 за окружение восемью плитками. Миплы возвращаются.</p><p>В конце незавершённые города дают 1 за плитку и щит, дороги — 1 за плитку, монастыри — по числу плиток вокруг, включая сам монастырь. Фермеры остаются до конца: по 3 за каждый завершённый город у поля. При равенстве миплов все лидеры получают полные очки.</p></div></details><button id="btn-force-end-game-cc" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-cc" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
+    <div class="game-wrap cc-wrap">
+      <div id="cc-scores" class="cc-scores"></div>
+      <div class="offline-actions" hidden><p class="hint-text">Участник офлайн. Можно ждать его возвращения или завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>
+      <div class="cc-controls"><div id="cc-preview"></div><div><strong id="cc-status"></strong><p id="cc-instruction" class="hint-text"></p><div class="cc-actions"><button id="cc-rotate" class="btn btn-secondary">↻ Повернуть</button><button id="cc-skip" class="btn btn-secondary" hidden>Без мипла · завершить ход</button><label>Масштаб <input id="cc-zoom" type="range" min="48" max="128" value="88" aria-label="Размер плиток"></label></div></div></div>
+      <p id="cc-error" class="error-text" hidden role="alert"></p>
+      <div id="cc-board-wrap" class="cc-board-wrap"><div id="cc-board" class="cc-board"></div></div>
+      <p class="hint-text">Поле можно прокручивать. Золотая рамка — последняя плитка. Нажмите на кружок объекта, чтобы поставить мипла.</p>
+      <div id="cc-log" class="cc-log"></div>
+    </div>
+  </section>
+
   <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
   <section id="screen-finished" class="screen">
     <div class="finished-wrap">
@@ -345,6 +358,7 @@
       <p id="finished-wait-hint" class="hint-text" hidden>Ждём хоста…</p>
     </div>
 
+    <div id="carcassonne-finished-report" hidden></div>
     <div id="codenames-finished-report" class="finished-report" hidden></div>
 
     <!-- слова и ассоциации по раундам — видно сразу, без переключателей -->
@@ -443,6 +457,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="codenames.js"></script>
+<script src="carcassonne-tiles.js"></script>
+<script src="carcassonne.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

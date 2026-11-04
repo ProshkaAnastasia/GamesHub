@@ -83,14 +83,16 @@ function validPayload(event, p) {
   if (!obj(p)) return false;
   if (emptyEvents.has(event)) return true;
   switch (event) {
-    case 'find-game': return str(p.name, 80) && ['decoder', 'ttr', 'codenames'].includes(p.gameType);
+    case 'find-game': return str(p.name, 80) && ['decoder', 'ttr', 'codenames', 'carcassonne'].includes(p.gameType);
+    case 'carcassonne-tile': return [p.x, p.y].every(n => Number.isInteger(n) && Math.abs(n) <= 72) && Number.isInteger(p.rotation) && p.rotation >= 0 && p.rotation <= 3;
+    case 'carcassonne-meeple': return p.feature === null || (typeof p.feature === 'string' && /^(c[0-3]|r[0-3]|f[0-9]+|m)$/.test(p.feature) && p.feature.length < 8);
     case 'codenames-clue': return str(p.word, 40) && (p.count === 'unlimited' || (Number.isInteger(p.count) && p.count >= 0 && p.count <= 9));
     case 'codenames-reveal': return Number.isInteger(p.index) && p.index >= 0 && p.index < 25;
     case 'create-room': return str(p.name, 80);
     case 'join-room': return str(p.name, 80) && code(p.roomCode) && (p.invite === undefined || str(p.invite, 100));
     case 'rejoin-room': return code(p.roomCode);
     case 'choose-team': return ['A', 'B', 'AB'].includes(p.team);
-    case 'set-game-type': return ['decoder', 'ttr', 'codenames'].includes(p.gameType);
+    case 'set-game-type': return ['decoder', 'ttr', 'codenames', 'carcassonne'].includes(p.gameType);
     case 'submit-clues': return words(p.clues, 3, 60);
     case 'update-guess': return ['own', 'intercept'].includes(p.kind) && Array.isArray(p.guess) && p.guess.length === 3 && p.guess.every(n => n === null || (Number.isInteger(n) && n >= 1 && n <= 4));
     case 'lock-guess': return ['own', 'intercept'].includes(p.kind);
