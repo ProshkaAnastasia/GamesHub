@@ -1576,15 +1576,15 @@ h1 {
 .hint-line { display: block; }
 #invitation-entry:not([hidden]) { display: grid; gap: 14px; }
 #invitation-entry > .field { margin: 0; }
-.match-game-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 24px; }
+.match-game-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .match-game-option { display: block; position: relative; min-width: 0; cursor: pointer; }
 .match-game-option input {
   position: absolute; width: 1px; height: 1px; opacity: 0;
 }
 .match-game-option span {
   display: flex; align-items: center; justify-content: center;
-  min-height: 44px; padding: 10px 12px;
-  font-family: var(--font-body); font-size: 14px; font-weight: 600;
+  min-height: 56px; height: 100%; padding: 10px 12px;
+  font-family: var(--font-body); font-size: 16px; font-weight: 600;
   line-height: 1.4; text-align: center; overflow-wrap: anywhere;
   color: var(--text-muted); background: var(--panel-raised);
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -1602,17 +1602,14 @@ h1 {
 .offline-actions:not([hidden]) { display: grid; gap: 20px; }
 .offline-actions > .hint-text { margin: 0; min-width: 0; line-height: 1.5; overflow-wrap: break-word; }
 
-@media (max-width: 360px) {
-  .match-game-picker { grid-template-columns: minmax(0, 1fr); }
-}
-
 /* More space around the landing form and between its action groups. */
 .landing-wrap .panel { padding: 32px; }
 .landing-wrap .panel > .field { margin-bottom: 32px; }
 .landing-actions .field-label { margin-bottom: 12px; }
+.landing-actions #match-game-label { margin-bottom: 18px; }
 @media (max-width: 560px) {
   .landing-wrap .panel { padding: 24px; }
-  .match-game-picker { grid-template-columns: minmax(0, 1fr); }
+  .match-game-option span { padding: 8px; font-size: 14px; }
 }
 
 @media (max-width: 560px) {
