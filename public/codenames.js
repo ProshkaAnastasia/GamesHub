@@ -9,10 +9,10 @@
     return board.map((card, index) => `<button type="button" class="cn-card cn-${kindClass(card.kind)} ${card.revealed ? 'cn-revealed' : ''} ${captainTeam && card.kind === captainTeam && !card.revealed ? 'cn-own-agent' : ''}" data-index="${index}" ${interactive && !card.revealed && !card.blocked ? '' : 'disabled'} aria-label="${escape(card.word)} — ${kindLabel(card.kind)}${card.revealed ? ', открыто' : ''}${captainTeam && card.kind === captainTeam ? ', ваша команда' : ''}"><span>${escape(card.word)}</span></button>`).join('');
   }
   const cardImages = {
-  "A": "Синяя команда_ агент в кобальтовой палитре, в едином стиле с красной карточкой..png",
-  "B": "Красная команда_ ретрошпионская иллюстрация агента, единый формат для печати, без надписей..png",
-  "neutral": "Мирный житель_ тёплая бежевая иллюстрация горожанина, в общем стиле шпионского набора..png",
-  "assassin": "Чёрная карточка_ таинственный убийца в нуарной палитре, без надписей и оружия..png"
+  "A": "blue.png",
+  "B": "red.png",
+  "neutral": "neutral.png",
+  "assassin": "assassin.png"
 };
   cardImages.agent = cardImages.A; // Reuse the supplied agent illustration for cooperative tokens.
   const mountedBoards = new WeakMap();

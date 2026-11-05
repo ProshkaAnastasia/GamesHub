@@ -176,7 +176,9 @@ chooseTickets`), события — в `server/server.js`
   Сохранения выбирают реализацию по `mode=duet`; старые сохранения — classic.
 - Основные тесты в `server/test/codenames.test.js` и `server/test/duet.test.js`.
 
-- Накладки Codenames: PNG в `public/codenames/cards/`, имена сопоставляются в
+- Накладки Codenames: PNG в `public/codenames/cards/`: `blue.png`, `red.png`,
+  `neutral.png`, `assassin.png`; шаблон — `word.png`. Латинские имена исключают
+  расхождения Unicode между macOS и Linux. Имена сопоставляются в
   `cardImages` (`public/codenames.js`). `renderBoard` сохраняет DOM карточек через
   WeakMap, чтобы чат не перезапускал анимацию и не пересоздавал изображения.
   `newReveals` учитывает номер партии, а не раунда. Итоговый отчёт получает тот
