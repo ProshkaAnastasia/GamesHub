@@ -700,14 +700,21 @@
     const partnerGuesses = $('#shared-partner-guesses');
     partnerGuesses.hidden = !tv.isSharedPlayer;
     partnerGuesses.innerHTML = tv.isSharedPlayer ? `
-      <h3>Ответы партнёров</h3>
-      <div class="guess-boards">${(tv.partnerGuesses || []).map(partner => {
-        const answer = (label, guess, locked) => `<p>${label}: <strong class="mono">${guess.map(digit => digit ?? '?').join(' — ')}</strong> · ${locked ? 'Подтверждено ✓' : 'Выбирает'}</p>`;
-        return `<div class="guess-board">
-          <div class="guess-board-head">${escapeHtml(partner.name)} · команда ${partner.team === 'A' ? 'А' : 'Б'}</div>
-          ${partner.ownGuess ? answer('Свой код', partner.ownGuess, partner.ownLocked) : ''}
-          ${answer('Перехват', partner.interceptGuess, partner.interceptLocked)}
-        </div>`;
+      <div class="partner-section-heading"><h3>Ответы партнёров</h3><span>Обновляются по ходу выбора</span></div>
+      <div class="partner-cards">${(tv.partnerGuesses || []).map(partner => {
+        const answer = (label, guess, locked) => {
+          const started = guess.some(digit => digit != null);
+          return `<div class="partner-answer ${locked ? 'is-confirmed' : ''}">
+            <div class="partner-answer-heading"><span>${label}</span><span class="partner-answer-status ${locked ? 'is-confirmed' : ''}">${locked ? '✓ Подтверждено' : started ? 'Выбирает' : 'Ожидаем ответ'}</span></div>
+            <div class="partner-digits" aria-label="${label}: ${guess.map(digit => digit ?? 'не выбрано').join(', ')}">${guess.map(digit => `<span class="partner-digit ${digit == null ? 'is-empty' : ''}">${digit ?? '·'}</span>`).join('')}</div>
+          </div>`;
+        };
+        const oppositeTeam = partner.team === 'A' ? 'Б' : 'А';
+        return `<article class="partner-card team-${partner.team.toLowerCase()}">
+          <header class="partner-card-heading"><div><strong>${escapeHtml(partner.name)}</strong><p>${partner.ownGuess ? 'Разгадывает ваш код' : 'Подсказывает вам'}</p></div><span class="partner-team-badge">${partner.team === 'A' ? 'А' : 'Б'}</span></header>
+          ${partner.ownGuess ? answer('Ваш код', partner.ownGuess, partner.ownLocked) : ''}
+          ${answer(`Перехват команды ${oppositeTeam}`, partner.interceptGuess, partner.interceptLocked)}
+        </article>`;
       }).join('')}</div>` : '';
     const oppTeamKey = tv.myTeamKey === 'A' ? 'B' : 'A';
     const isLoneMe = view.loneTeam === tv.myTeamKey;
@@ -725,7 +732,7 @@
     // соло-команде нечего расшифровывать у себя; команде из двух нечего
     // перехватывать у соло-соперника — прячем неактуальную половину панели
     $('#guess-board-own').hidden = isLoneMe;
-    $('#guess-board-intercept').hidden = oppIsLone;
+    $('#guess-board-intercept').hidden = oppIsLone || tv.isSharedPlayer;
     $('#guess-board-intercept').setAttribute('aria-disabled', String(!!tv.isSharedPlayer));
     $('#intercept-board-hint').textContent = tv.isSharedPlayer
       ? '(общий игрок не участвует в перехватах)' : '(попробуйте перехватить)';

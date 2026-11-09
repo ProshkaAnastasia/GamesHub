@@ -530,6 +530,25 @@ h1 {
   padding: 14px;
 }
 .guess-board-head { font-size: 13px; margin-bottom: 12px; min-height: 34px; }
+#shared-partner-guesses { margin-bottom: 24px; }
+.partner-section-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin-bottom: 12px; }
+.partner-section-heading h3 { margin: 0; font-size: 15px; }
+.partner-section-heading > span { color: var(--text-muted); font-size: 11px; }
+.partner-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.partner-card { --partner-color: var(--team-a); min-width: 0; padding: 16px; border: 1px solid var(--border); border-top: 3px solid var(--partner-color); border-radius: 14px; background: linear-gradient(150deg, color-mix(in srgb, var(--partner-color) 9%, var(--panel)), var(--panel)); }
+.partner-card.team-b { --partner-color: var(--team-b); }
+.partner-card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.partner-card-heading strong { display: block; overflow-wrap: anywhere; font-size: 15px; }
+.partner-card-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
+.partner-team-badge { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border: 1px solid color-mix(in srgb, var(--partner-color) 40%, transparent); border-radius: 9px; color: var(--partner-color); font-weight: 700; font-size: 12px; }
+.partner-answer + .partner-answer { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.partner-answer-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 9px; font-size: 12px; }
+.partner-answer-status { color: var(--text-muted); font-size: 10px; }
+.partner-answer-status.is-confirmed { color: var(--accent); }
+.partner-digits { display: flex; gap: 7px; }
+.partner-digit { display: grid; place-items: center; width: 40px; height: 43px; border: 1px solid color-mix(in srgb, var(--partner-color) 45%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--partner-color) 9%, var(--bg)); color: var(--partner-color); font: 600 22px var(--font-display); }
+.partner-digit.is-empty { color: var(--text-muted); border-style: dashed; background: transparent; }
+@media(max-width:560px) { .partner-cards { grid-template-columns: 1fr; } }
 .digit-picker { display: flex; gap: 8px; margin-bottom: 14px; }
 .digit-slot {
   flex: 1;
