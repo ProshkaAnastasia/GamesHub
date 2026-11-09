@@ -6,6 +6,8 @@ const codenames = require('./codenames');
 const carcassonne = require('./carcassonne');
 const battleship = require('./battleship');
 const sixnimmt = require('./sixnimmt');
+const cryptid = require('./cryptid');
+const railroad = require('./railroad');
 
 const GAME_MODULES = {
   [decoder.id]: decoder,
@@ -14,6 +16,8 @@ const GAME_MODULES = {
   [carcassonne.id]: carcassonne,
   [battleship.id]: battleship,
   [sixnimmt.id]: sixnimmt,
+  [cryptid.id]: cryptid,
+  [railroad.id]: railroad,
 };
 
 const DEFAULT_GAME_TYPE = decoder.id;

@@ -419,6 +419,32 @@ io.on('connection', (socket) => {
     if (result.ok) broadcastRoom(room);
   });
 
+  for (const [event, method, args] of [
+    ['cryptid-mark', 'cryptidMark', p => [p.cell]],
+    ['cryptid-question', 'cryptidQuestion', p => [p.target, p.cell]],
+    ['cryptid-search', 'cryptidSearch', p => [p.cell]],
+  ]) onEvent(event, (payload, cb) => {
+    const session = sessions.get(socket.id);
+    const room = session && manager.get(session.roomCode);
+    if (!room || room.gameType !== 'cryptid') return cb({ error: 'Сейчас нет партии «Криптид»' });
+    const result = room[method](session.playerId, ...args(payload));
+    cb(result);
+    if (result.ok) broadcastRoom(room);
+  });
+
+  for (const [event, method, args] of [
+    ['railroad-place', 'railroadPlace', p => [p.source, p.x, p.y, p.rotation, p.flipped]],
+    ['railroad-undo', 'railroadUndo', () => []],
+    ['railroad-finish-round', 'railroadFinishRound', () => []],
+  ]) onEvent(event, (payload, cb) => {
+    const session = sessions.get(socket.id);
+    const room = session && manager.get(session.roomCode);
+    if (!room || room.gameType !== 'railroad') return cb({ error: 'Сейчас нет партии Railroad Ink' });
+    const result = room[method](session.playerId, ...args(payload));
+    cb(result);
+    if (result.ok) broadcastRoom(room);
+  });
+
   onEvent('force-end-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);

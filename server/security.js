@@ -78,12 +78,16 @@ const str = (v, n = 100) => typeof v === 'string' && v.length <= n;
 const code = v => typeof v === 'string' && /^[A-Z2-9]{4}$/i.test(v);
 const words = (v, n, length) => Array.isArray(v) && v.length === n && v.every(w => str(w, length));
 const payment = v => obj(v) && Object.entries(v).every(([k, n]) => ['pink', 'white', 'blue', 'yellow', 'orange', 'black', 'red', 'green', 'locomotive'].includes(k) && Number.isInteger(n) && n >= 0 && n <= 110);
-const emptyEvents = new Set(['sixnimmt-next', 'battleship-auto', 'battleship-ready', 'codenames-end-turn', 'my-rooms', 'list-rooms', 'start-game', 'lock-tiebreak-guess', 'draw-tickets', 'force-end-game', 'play-again', 'mark-chat-read', 'leave-room']);
+const emptyEvents = new Set(['railroad-undo', 'railroad-finish-round', 'sixnimmt-next', 'battleship-auto', 'battleship-ready', 'codenames-end-turn', 'my-rooms', 'list-rooms', 'start-game', 'lock-tiebreak-guess', 'draw-tickets', 'force-end-game', 'play-again', 'mark-chat-read', 'leave-room']);
 function validPayload(event, p) {
   if (!obj(p)) return false;
   if (emptyEvents.has(event)) return true;
   switch (event) {
-    case 'find-game': return str(p.name, 80) && ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt'].includes(p.gameType);
+    case 'find-game': return str(p.name, 80) && ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad'].includes(p.gameType);
+    case 'railroad-place': return ((Number.isInteger(p.source) && p.source >= 0 && p.source < 4) || ['special-highway','special-railway','special-three-highways','special-three-railways','special-station-adjacent','special-station-opposite'].includes(p.source)) && [p.x,p.y].every(n => Number.isInteger(n) && n >= 0 && n < 7) && Number.isInteger(p.rotation) && p.rotation >= 0 && p.rotation < 4 && typeof p.flipped === 'boolean';
+    case 'cryptid-mark':
+    case 'cryptid-search': return Number.isInteger(p.cell) && p.cell >= 0 && p.cell < 108;
+    case 'cryptid-question': return Number.isInteger(p.cell) && p.cell >= 0 && p.cell < 108 && str(p.target, 100);
     case 'sixnimmt-select': return Number.isInteger(p.card) && p.card >= 1 && p.card <= 104;
     case 'sixnimmt-row': return Number.isInteger(p.row) && p.row >= 0 && p.row < 4;
     case 'battleship-layout': return Array.isArray(p.ships) && p.ships.length <= 10 && p.ships.every(s => Array.isArray(s) && s.length >= 1 && s.length <= 4 && s.every(n => Number.isInteger(n) && n >= 0 && n < 100));
@@ -96,7 +100,7 @@ function validPayload(event, p) {
     case 'join-room': return str(p.name, 80) && code(p.roomCode) && (p.invite === undefined || str(p.invite, 100));
     case 'rejoin-room': return code(p.roomCode);
     case 'choose-team': return ['A', 'B', 'AB'].includes(p.team);
-    case 'set-game-type': return ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt'].includes(p.gameType);
+    case 'set-game-type': return ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad'].includes(p.gameType);
     case 'submit-clues': return words(p.clues, 3, 60);
     case 'update-guess': return ['own', 'intercept'].includes(p.kind) && Array.isArray(p.guess) && p.guess.length === 3 && p.guess.every(n => n === null || (Number.isInteger(n) && n >= 1 && n <= 4));
     case 'lock-guess': return ['own', 'intercept'].includes(p.kind);

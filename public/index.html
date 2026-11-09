@@ -375,6 +375,41 @@
   </section>
 
   <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
+  <section id="screen-game-cryptid" class="screen">
+    <header class="topbar game-topbar"><strong>Криптид</strong><button id="btn-cryptid-sound-toggle" class="btn-icon" title="Звук хода: включён" aria-label="Звук хода: включён">🔔</button><button id="btn-force-end-game-cryptid" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-cryptid" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
+    <div class="cryptid-wrap">
+      <div id="cryptid-roster" class="cryptid-roster"></div>
+      <div class="offline-actions" hidden><p class="hint-text">Игрок офлайн. Можно дождаться возвращения или завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>
+      <div class="cryptid-heading"><span class="field-label">Экспедиция · базовый режим</span><h2 id="cryptid-status" aria-live="polite"></h2><p id="cryptid-instruction" class="hint-text"></p></div>
+      <details id="cryptid-secret" class="cryptid-secret"><summary>Моя секретная подсказка</summary><p id="cryptid-clue"></p></details>
+      <div id="cryptid-legend" class="cryptid-legend"></div>
+      <label class="cryptid-zoom">Масштаб карты <input id="cryptid-zoom" type="range" min="70" max="150" value="100"></label>
+      <div id="cryptid-map" class="cryptid-map" aria-label="Карта экспедиции"></div>
+      <section class="cryptid-controls"><div id="cryptid-selection"><strong>Выберите клетку на карте</strong></div><div class="cryptid-actions"><label id="cryptid-target-label">Кого спросить?<select id="cryptid-target"></select></label><button id="cryptid-question" class="btn btn-secondary">Спросить игрока</button><button id="cryptid-search" class="btn btn-primary">Искать существо</button><button id="cryptid-mark" class="btn btn-primary">Поставить кубик</button></div></section>
+      <p id="cryptid-error" class="error-text" role="alert" hidden></p>
+      <details class="cryptid-help"><summary>Как играть и какие бывают подсказки</summary><p>На карте есть ровно одна клетка, подходящая под подсказки всех игроков. Каждый знает только свою.</p><p>Круглый диск означает «возможно по моей подсказке», квадратный кубик — «невозможно». Цвет и номер маркера обозначают игрока. Клетку с любым кубиком больше нельзя использовать.</p><p>В начале каждый по очереди ставит два кубика — по одному за круг. Затем в свой ход спросите одного игрока о клетке или объявите поиск. Игра сама поставит честный ответ.</p><p>Если ответ — кубик, поставьте свой кубик в другой клетке, запрещённой вашей подсказкой. При поиске ответы проверяются по порядку до первого отказа. Если отказов нет — вы победили.</p><p>Если ваш диск уже стоит в месте поиска, сначала нужно поставить ещё один диск в другой подходящей клетке. Когда для обязательного маркера не осталось ни одного допустимого места, игра продолжает ход без него.</p><p>Расстояние считается по соседним граням шестиугольников. Сама клетка — расстояние 0. «Не дальше 2» означает расстояние 0, 1 или 2.</p><p>Здесь используется новая генерируемая карта, а не раскладки из печатного издания. Подсказки базового режима, без отрицаний и чёрных построек.</p><div id="cryptid-catalog"></div></details>
+      <label id="cryptid-notes-label" class="field"><span class="field-label">Личные заметки · сохраняются только в этом браузере</span><textarea id="cryptid-notes" rows="3" maxlength="5000" placeholder="Например: у игрока 2 подсказка, похоже, про воду…"></textarea></label>
+      <details class="cryptid-help"><summary>Журнал экспедиции</summary><div id="cryptid-log"></div></details>
+    </div>
+  </section>
+
+  <section id="screen-game-unavailable" class="screen">
+    <div class="landing-wrap"><div class="panel"><h2>Нужно обновить страницу</h2><p>Для этой игры нужна новая версия страницы. Обновите её — подключение к комнате восстановится.</p><button id="btn-reload-game" class="btn btn-primary">Обновить страницу</button></div></div>
+  </section>
+
+  <section id="screen-game-railroad" class="screen">
+    <header class="topbar game-topbar"><strong>Railroad Ink</strong><button id="btn-railroad-sound-toggle" class="btn-icon" title="Звук раунда: включён" aria-label="Звук раунда: включён">🔔</button><button id="btn-force-end-game-railroad" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-railroad" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
+    <div class="rr-wrap">
+      <div id="rr-roster" class="rr-roster"></div>
+      <div class="offline-actions" hidden><p class="hint-text">Игрок офлайн. Можно дождаться возвращения или завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>
+      <div class="rr-heading"><span id="rr-round" class="field-label"></span><h2 id="rr-status" aria-live="polite"></h2><p id="rr-hint" class="hint-text"></p></div>
+      <div class="rr-layout"><section class="rr-map-section"><div id="rr-board-tabs" class="rr-board-tabs" role="group" aria-label="Чьё поле посмотреть"></div><div id="rr-board" class="rr-board"></div><div id="rr-progress" class="rr-progress"></div><p class="rr-legend">Бежевые линии — дороги · голубые — рельсы · золотой квадрат — станция</p></section>
+      <section class="rr-toolbox"><h3>Общие кубики</h3><div id="rr-dice" class="rr-dice"></div><div class="rr-transform"><button id="rr-rotate" class="btn btn-secondary">↻ Повернуть</button><button id="rr-flip" class="btn btn-secondary">⇋ Отразить</button></div><div id="rr-piece-description" class="hint-text"></div><h3 id="rr-special-heading">Спецмаршруты</h3><div id="rr-specials" class="rr-specials"></div><p id="rr-special-count" class="hint-text"></p><div class="rr-actions"><button id="rr-undo" class="btn btn-secondary">Отменить размещение</button><button id="rr-finish" class="btn btn-primary">Завершить раунд</button></div><p id="rr-error" class="error-text" role="alert" hidden></p></section></div>
+      <details class="cryptid-help"><summary>Как играть и считать очки</summary><p>Игра длится 7 раундов. Каждый получает те же 4 маршрута с общих кубиков и размещает их на своём поле в любом порядке. Поворот и отражение разрешены. Подсвечены допустимые места для выбранной ориентации.</p><p>Новый маршрут должен соединяться с выходом на краю поля или уже проложенной сетью. Дорогу и железную дорогу напрямую соединять нельзя: для этого нужна станция (квадрат). Путепровод позволяет им пересечься без соединения.</p><p>Все 4 кубика нужно использовать, если есть место. Неиспользованные кубики можно пропустить лишь тогда, когда ни один из них больше не помещается. До подтверждения раунда можно отменять свои размещения в обратном порядке.</p><p>Спецмаршрут — дополнительный: не больше одного в раунд, не больше трёх за игру, каждый из шести видов — только один раз.</p><p>Связанные выходы в одной сети: 2 выхода — 4 очка, 3 — 8, далее по 4 за каждый дополнительный; все 12 — 45 очков. Отдельный выход очков не приносит.</p><p>Самая длинная непрерывная дорога и железная дорога приносят по 1 очку за клетку, без ветвлений и повторного прохода клетки. Станции их не прерывают. Каждая заполненная клетка в центральном квадрате 3 × 3 — ещё 1 очко.</p><p>За каждый конец маршрута, не соединённый с другим маршрутом или внешней границей поля, вычитается 1 очко. При равном счёте побеждает игрок с меньшим числом обрывов. Одному можно улучшать личный рекорд этого браузера.</p><p>Базовый режим без дополнений «Реки» и «Озёра».</p></details>
+    </div>
+  </section>
+
+  <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
   <section id="screen-finished" class="screen">
     <div class="finished-wrap">
       <div class="brand-mark large">◈</div>
@@ -390,6 +425,8 @@
 
     <div id="battleship-finished-report" hidden></div>
     <div id="sixnimmt-finished-report" hidden></div>
+    <div id="cryptid-finished-report" hidden></div>
+    <div id="railroad-finished-report" hidden></div>
     <div id="carcassonne-finished-report" hidden></div>
     <div id="codenames-finished-report" class="finished-report" hidden></div>
 
@@ -493,6 +530,9 @@
 <script src="carcassonne.js"></script>
 <script src="battleship.js"></script>
 <script src="sixnimmt.js"></script>
+<script src="cryptid.js"></script>
+<script src="railroad-tiles.js"></script>
+<script src="railroad.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

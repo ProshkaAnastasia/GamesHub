@@ -252,6 +252,12 @@ class Room {
   sixnimmtSelect(id, card) { return this._delegate('selectCard', id, card); }
   sixnimmtRow(id, row) { return this._delegate('chooseRow', id, row); }
   sixnimmtNext(id) { return this._delegate('nextTurn', id); }
+  cryptidMark(id, cell) { return this._delegate('placeMarker', id, cell); }
+  cryptidQuestion(id, target, cell) { return this._delegate('question', id, target, cell); }
+  cryptidSearch(id, cell) { return this._delegate('search', id, cell); }
+  railroadPlace(id, source, x, y, rotation, flipped) { return this._delegate('place', id, source, x, y, rotation, flipped); }
+  railroadUndo(id) { return this._delegate('undo', id); }
+  railroadFinishRound(id) { return this._delegate('finishRound', id); }
 
   carcassonneTile(playerId, x, y, rotation) { return this._delegate('placeTile', playerId, x, y, rotation); }
   carcassonneMeeple(playerId, feature) { return this._delegate('placeMeeple', playerId, feature); }
