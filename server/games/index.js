@@ -1,11 +1,11 @@
-// Реестр доступных типов игр — чтобы добавить новую игру, достаточно
-// написать самодостаточный модуль (по образцу ./decoder) и добавить его
-// сюда одной строкой; ни Room, ни server.js трогать для этого не нужно.
+// Реестр модулей. Специфичные игровые действия также регистрируются
+// делегатами Room, socket-событиями и валидаторами payload.
 const decoder = require('./decoder');
 const ttr = require('./ttr');
 const codenames = require('./codenames');
 const carcassonne = require('./carcassonne');
 const battleship = require('./battleship');
+const sixnimmt = require('./sixnimmt');
 
 const GAME_MODULES = {
   [decoder.id]: decoder,
@@ -13,6 +13,7 @@ const GAME_MODULES = {
   [codenames.id]: codenames,
   [carcassonne.id]: carcassonne,
   [battleship.id]: battleship,
+  [sixnimmt.id]: sixnimmt,
 };
 
 const DEFAULT_GAME_TYPE = decoder.id;

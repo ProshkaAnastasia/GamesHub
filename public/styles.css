@@ -1847,3 +1847,59 @@ h1 {
 .bs-help summary::-webkit-details-marker { display: none; }
 .bs-help > div { position: absolute; top: 100%; right: 0; z-index: 40; width: min(420px, calc(100vw - 40px)); max-height: 60vh; overflow: auto; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: #151c21; color: var(--text-muted); font-size: 13px; line-height: 1.6; box-shadow: 0 12px 32px #0008; }
 @media(max-width:680px) { .bs-boards { grid-template-columns: minmax(0, 1fr); gap: 24px; } .bs-grid { gap: 2px; } .bs-help > div { position: fixed; top: 90px; right: 20px; } .bs-ship-choice > span { letter-spacing: 1px; } }
+
+/* Корова 006 */
+#screen-game-sixnimmt .game-topbar, .six-wrap { max-width: 1040px; margin-left: auto; margin-right: auto; }
+#screen-game-sixnimmt .game-topbar > strong { margin-right: auto; }
+.six-wrap { padding: 0 20px 36px; }
+.six-scores { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+.six-score { display: grid; grid-template-columns: 1fr auto; gap: 5px 18px; min-width: 130px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); padding: 10px 13px; font-size: 12px; }
+.six-score.is-me { border-color: var(--accent); }
+.six-score strong { overflow-wrap: anywhere; }
+.six-score b { color: #f2b96d; }
+.six-score > span { grid-column: 1 / -1; color: var(--text-muted); font-size: 10px; }
+.six-status { margin: 24px 0 18px; }
+.six-status h2 { font-size: clamp(19px, 3vw, 26px); margin: 8px 0; }
+.six-card { --card-color: #f5dfb6; position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: space-between; flex: 0 0 62px; width: 62px; height: 93px; border: 0; border-radius: 7px; padding: 6px; color: var(--card-color); background: #103b3c url('/sixnimmt/card-face.png') center / 100% 100% no-repeat; box-shadow: 0 3px 7px #0003; font-family: var(--font-display); }
+.six-card small { position: absolute; top: 24%; left: 11%; font-size: 8px; opacity: .85; line-height: 1; }
+.six-card strong { position: absolute; top: 45%; left: 0; right: 0; text-align: center; font-size: 25px; line-height: 1; text-shadow: 0 2px 3px #001b1c; }
+.six-heads { position: absolute; bottom: 15%; left: 0; right: 0; text-align: center; font-size: 11px; line-height: 1; }
+.six-value-2 { --card-color: #e8c872; }
+.six-value-3 { --card-color: #eca575; }
+.six-value-5 { --card-color: #c7a0f1; }
+.six-value-7 { --card-color: #f39bb1; }
+button.six-card { cursor: pointer; transition: transform .12s, box-shadow .12s; }
+button.six-card:hover, button.six-card:focus-visible { transform: translateY(-5px); outline: 2px solid var(--accent); outline-offset: 2px; }
+.six-card.is-picked { outline: 3px solid var(--accent); outline-offset: 2px; transform: translateY(-5px); }
+.six-rows { display: grid; gap: 10px; }
+.six-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
+.six-row-number { font: 13px var(--font-display); color: var(--text-muted); }
+.six-row-cards { display: flex; gap: 7px; flex: 1; }
+.six-empty-slot { width: 62px; height: 93px; border: 1px dashed #ffffff12; border-radius: 10px; }
+.six-row-end { display: grid; gap: 7px; text-align: center; min-width: 68px; font-size: 13px; color: #f2b96d; }
+.six-row-end small { font-size: 10px; color: var(--text-muted); }
+.six-row-end .btn { font-size: 11px; padding: 9px; }
+.six-row.is-choosable { border-color: #e8c872; }
+.six-hand { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 0 18px; }
+#six-hand-section { margin-top: 24px; }
+#six-hand-section[hidden], #six-next[hidden], .six-revealed[hidden] { display: none; }
+#six-submit, #six-next { width: auto; min-width: 200px; }
+#six-next { margin-top: 20px; }
+.six-revealed { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; }
+.six-played { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100px; font-size: 10px; color: var(--text-muted); }
+.six-played > span:last-child { overflow-wrap: anywhere; }
+.six-played.is-pending .six-card { outline: 2px solid #e8c872; outline-offset: 3px; }
+.six-moves, .six-history { margin-top: 24px; font-size: 12px; line-height: 1.7; color: var(--text-muted); }
+.six-penalty { color: #f39bb1; font-weight: 700; }
+@media(max-width:600px) {
+  .six-wrap { padding: 0 12px 28px; }
+  .six-row { gap: 6px; padding: 8px 5px; }
+  .six-row-cards { gap: 3px; }
+  .six-row .six-card, .six-row .six-empty-slot { width: 42px; height: 63px; flex-basis: 42px; border-radius: 7px; padding: 4px; }
+  .six-row .six-card strong { font-size: 18px; top: 40%; }
+  .six-row .six-heads { font-size: 9px; bottom: 14%; }
+  .six-row-number { font-size: 10px; }
+  .six-row-end { min-width: 54px; font-size: 11px; }
+  .six-row-end .btn { padding: 8px 4px; font-size: 10px; }
+}
+@media(max-width:360px) { .six-row .six-card, .six-row .six-empty-slot { width: 36px; flex-basis: 36px; } }

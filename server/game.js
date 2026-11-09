@@ -249,6 +249,9 @@ class Room {
   battleshipAuto(id) { return this._delegate('autoArrange', id); }
   battleshipReady(id) { return this._delegate('readyFleet', id); }
   battleshipFire(id, index) { return this._delegate('fire', id, index); }
+  sixnimmtSelect(id, card) { return this._delegate('selectCard', id, card); }
+  sixnimmtRow(id, row) { return this._delegate('chooseRow', id, row); }
+  sixnimmtNext(id) { return this._delegate('nextTurn', id); }
 
   carcassonneTile(playerId, x, y, rotation) { return this._delegate('placeTile', playerId, x, y, rotation); }
   carcassonneMeeple(playerId, feature) { return this._delegate('placeMeeple', playerId, feature); }

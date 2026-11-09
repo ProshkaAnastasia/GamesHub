@@ -203,7 +203,7 @@ io.on('connection', (socket) => {
     if (room.visibility !== 'private') return cb({ error: 'Для публичной игры используйте подбор игроков' });
     if (!invite || invite !== room.inviteToken) return cb({ error: 'Для входа нужна ссылка-приглашение' });
     if (room.players.has(socket.data.playerId) && !room.players.get(socket.data.playerId).left) return cb({ error: 'Используйте восстановление подключения' });
-    if ([...room.players.values()].filter(p => p.connected).length >= 8) return cb?.({ error: 'Комната заполнена' });
+    if ([...room.players.values()].filter(p => p.connected).length >= Math.max(8, room.module?.maxPlayers || 8)) return cb?.({ error: 'Комната заполнена' });
     if (!detachRoom(socket, cb)) return;
     const playerId = socket.data.playerId;
     const trimmedName = (name || 'Игрок').trim() || 'Игрок';
@@ -401,6 +401,19 @@ io.on('connection', (socket) => {
     const session = sessions.get(socket.id);
     const room = session && manager.get(session.roomCode);
     if (!room || room.gameType !== 'battleship') return cb({ error: 'Сейчас нет партии Морского боя' });
+    const result = room[method](session.playerId, ...args(payload));
+    cb(result);
+    if (result.ok) broadcastRoom(room);
+  });
+
+  for (const [event, method, args] of [
+    ['sixnimmt-select', 'sixnimmtSelect', p => [p.card]],
+    ['sixnimmt-row', 'sixnimmtRow', p => [p.row]],
+    ['sixnimmt-next', 'sixnimmtNext', () => []],
+  ]) onEvent(event, (payload, cb) => {
+    const session = sessions.get(socket.id);
+    const room = session && manager.get(session.roomCode);
+    if (!room || room.gameType !== 'sixnimmt') return cb({ error: 'Сейчас нет партии «Корова 006»' });
     const result = room[method](session.playerId, ...args(payload));
     cb(result);
     if (result.ok) broadcastRoom(room);

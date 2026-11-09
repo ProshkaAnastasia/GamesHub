@@ -3,7 +3,7 @@ const Module=require('../games/carcassonne');const {tiles}=require('../../public
 const players=()=>new Map(['a','b','c'].map(id=>[id,{id,name:id,connected:true}]));
 const game=()=>Module.create(players());
 const tile=(x,y,id,rotation=0,meeple=null)=>({x,y,id,rotation,meeple});
-test('Carcassonne deck, start tile, player limits and hidden future deck',()=>{const g=game();assert.equal(Object.values(tiles).reduce((n,t)=>n+t.count,0),72);assert.equal(g.deck.length,70);assert.equal(g.board.length,1);assert.equal(g.board[0].id,'D');assert.equal(Module.canStart({},players()),true);assert.equal(Module.canStart({},new Map([['a',{connected:true}]])),false);assert.equal(g.viewFor('a').carcassonne.deck,undefined);assert.deepEqual(Object.values(g.meeples),[7,7,7]);});
+test('Carcassonne deck, start tile, player limits and hidden future deck',()=>{const g=game();assert.equal(Object.values(tiles).reduce((n,t)=>n+t.count,0),72);assert.equal(g.deck.length,142);assert.equal(g.board.length,1);assert.equal(g.board[0].id,'D');assert.equal(Module.canStart({},players()),true);assert.equal(Module.canStart({},new Map([['a',{connected:true}]])),false);assert.equal(g.viewFor('a').carcassonne.deck,undefined);assert.deepEqual(Object.values(g.meeples),[7,7,7]);});
 test('tile placement checks turn, all neighbors, adjacency, rotation and phase',()=>{const g=game(),id=g.currentPlayerId;assert.ok(g.placeTile('stranger',1,0,0).error);assert.ok(g.placeTile(id,20,20,0).error);assert.ok(g.placeTile(id,0,0,0).error);assert.ok(g.placeTile(id,1,0,4).error);const p=g.placements()[0];assert.ok(g.placeTile(id,p.x,p.y,p.rotations[0]).ok);assert.ok(g.placeTile(id,2,0,0).error);assert.ok(g.placeMeeple('stranger',null).error);assert.ok(g.placeMeeple(id,'invalid').error);assert.ok(g.placeMeeple(id,null).ok);assert.notEqual(g.currentPlayerId,id);});
 test('connected city is occupied and completing it scores shields then returns meeple',()=>{const g=game(),id=g.currentPlayerId;g.board=[tile(0,0,'E',0,{playerId:id,feature:'c0'}),tile(0,-1,'E',2)];g.lastPlaced={x:0,y:-1};g.meeples[id]=6;assert.ok(!g.choices().includes('c0'));g.scoreCompleted();assert.equal(g.scores[id],4);assert.equal(g.meeples[id],7);assert.equal(g.board[0].meeple,null);
   g.board=[tile(0,0,'F',0,{playerId:id,feature:'c0'})];g.meeples[id]=6;g.scoreCompleted(true);assert.equal(g.scores[id],6);});
@@ -12,11 +12,24 @@ test('merged objects give full tied-majority points, roads count tiles only once
 test('monastery scores all nine surrounding tiles and returns monk',()=>{const g=game(),id=g.currentPlayerId;g.board=[tile(0,0,'B',0,{playerId:id,feature:'m'})];g.meeples[id]=6;g.scoreCompleted();assert.equal(g.scores[id],0);for(let x=-1;x<=1;x++)for(let y=-1;y<=1;y++)if(x||y)g.board.push(tile(x,y,'B'));g.scoreCompleted();assert.equal(g.scores[id],9);assert.equal(g.meeples[id],7);});
 test('fields join across half edges, persist until end, and score each completed city once',()=>{const g=game(),id=g.currentPlayerId;g.board=[tile(0,0,'E',0,{playerId:id,feature:'f0'}),tile(0,-1,'E',2),tile(1,0,'B'),tile(1,-1,'B')];g.meeples[id]=6;g.scoreCompleted();assert.equal(g.scores[id],0);assert.equal(g.meeples[id],6);const f=tiles.E.features.find(f=>f.type==='field'),comp=g.component(g.board[0],f);assert.equal(comp.tileKeys.size,4);g.finalScore();assert.equal(g.scores[id],3);assert.equal(g.meeples[id],7);});
 test('field partitions reflect road/city barriers, including city-road bends',()=>{const fields=id=>tiles[id].features.filter(f=>f.type==='field');assert.equal(fields('U').length,2);assert.equal(fields('X').length,4);assert.equal(fields('O').length,2);assert.equal(fields('A').length,1);for(const t of Object.values(tiles)){const ports=t.features.filter(f=>f.type==='field').flatMap(f=>f.ports);assert.equal(new Set(ports).size,ports.length);for(let e=0;e<4;e++)assert.equal(ports.filter(p=>Math.floor(p/2)===e).length,t.edges[e]==='city'?0:2);}});
-test('save/restore, spectators, impossible tile discard and full game final scoring',()=>{let g=game();for(let i=0;i<71&&!g.finished;i++){const id=g.currentPlayerId,p=g.placements()[0];assert.ok(p);assert.ok(g.placeTile(id,p.x,p.y,p.rotations[0]).ok);const choices=g.choices();assert.ok(g.placeMeeple(id,i%3===0&&choices.length?choices[0]:null).ok);if(i===8){const data=JSON.parse(JSON.stringify(g));g=Module.fromData(data,players());assert.deepEqual(g.toJSON(),data);assert.equal(g.viewFor('outsider').carcassonne.canAct,false);}}
-  assert.equal(g.finished,true);assert.equal(g.board.length+g.discarded,72);assert.equal(g.phase,'finished');assert.ok(Object.values(g.scores).every(n=>n>=0));assert.ok(g.placeMeeple(g.currentPlayerId,null).error);assert.ok(g.getArchiveSummary().carcassonne.board.length);});
+test('save/restore, spectators, impossible tile discard and full game final scoring',()=>{let g=game();for(let i=0;i<143&&!g.finished;i++){const id=g.currentPlayerId,p=g.placements()[0];assert.ok(p);assert.ok(g.placeTile(id,p.x,p.y,p.rotations[0]).ok);const choices=g.choices();assert.ok(g.placeMeeple(id,i%3===0&&choices.length?choices[0]:null).ok);if(i===8){const data=JSON.parse(JSON.stringify(g));g=Module.fromData(data,players());assert.deepEqual(g.toJSON(),data);assert.equal(g.viewFor('outsider').carcassonne.canAct,false);}}
+  assert.equal(g.finished,true);assert.equal(g.board.length+g.discarded,144);assert.equal(g.phase,'finished');assert.ok(Object.values(g.scores).every(n=>n>=0));assert.ok(g.placeMeeple(g.currentPlayerId,null).error);assert.ok(g.getArchiveSummary().carcassonne.board.length);});
 test('security validates Carcassonne actions',()=>{assert.equal(validPayload('find-game',{name:'A',gameType:'carcassonne'}),true);assert.equal(validPayload('carcassonne-tile',{x:0,y:-1,rotation:3}),true);assert.equal(validPayload('carcassonne-tile',{x:0,y:-1,rotation:4}),false);assert.equal(validPayload('carcassonne-tile',{x:0.1,y:-1,rotation:0}),false);assert.equal(validPayload('carcassonne-meeple',{feature:null}),true);assert.equal(validPayload('carcassonne-meeple',{feature:'__proto__'}),false);});
 
 test('unplaceable tiles are discarded and a new legal tile is drawn',()=>{
   const g=game();g.board=[tile(0,0,'B')];g.deck=['E','C'];g.discarded=0;g.draw();
   assert.equal(g.currentTile,'E');assert.equal(g.discarded,1);assert.ok(g.placements().length);
+});
+
+test('long game doubles each tile type with just one starting tile and preserves existing saves',()=>{
+  const g=game();
+  const all=[...g.board.map(t=>t.id),g.currentTile,...g.deck];
+  assert.equal(all.length,144);
+  for(const spec of Object.values(tiles))assert.equal(all.filter(id=>id===spec.id).length,spec.count*2);
+  const data=JSON.parse(JSON.stringify(g));
+  data.deck=data.deck.slice(0,12);
+  const restored=Module.fromData(data,players());
+  assert.deepEqual(restored.deck,data.deck);
+  assert.equal(validPayload('carcassonne-tile',{x:100,y:-100,rotation:0}),true);
+  assert.equal(validPayload('carcassonne-tile',{x:145,y:0,rotation:0}),false);
 });

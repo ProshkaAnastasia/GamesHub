@@ -335,7 +335,7 @@
   </section>
 
   <section id="screen-game-carcassonne" class="screen">
-    <header class="topbar game-topbar"><strong>Каркассон</strong><button id="btn-cc-sound-toggle" class="btn-icon" title="Звук хода: включён" aria-label="Звук хода: включён" aria-pressed="true">🔔</button><details class="cc-help"><summary aria-label="Правила игры">?</summary><div><p>В свой ход поверните плитку и выберите подсвеченное место. Все края должны совпадать.</p><p>Затем можно поставить одного из 7 миплов на свободный объект новой плитки или пропустить. Соединять уже занятые объекты можно; новый мипл на занятый объект не ставится.</p><p>Завершённая дорога: 1 очко за плитку. Город: 2 за плитку и щит. Монастырь: 9 за окружение восемью плитками. Миплы возвращаются.</p><p>В конце незавершённые города дают 1 за плитку и щит, дороги — 1 за плитку, монастыри — по числу плиток вокруг, включая сам монастырь. Фермеры остаются до конца: по 3 за каждый завершённый город у поля. При равенстве миплов все лидеры получают полные очки.</p></div></details><button id="btn-force-end-game-cc" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-cc" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
+    <header class="topbar game-topbar"><strong>Каркассон</strong><button id="btn-cc-sound-toggle" class="btn-icon" title="Звук хода: включён" aria-label="Звук хода: включён" aria-pressed="true">🔔</button><details class="cc-help"><summary aria-label="Правила игры">?</summary><div><p>Длинная партия: 144 плитки — два базовых набора. В свой ход поверните плитку и выберите подсвеченное место. Все края должны совпадать.</p><p>Затем можно поставить одного из 7 миплов на свободный объект новой плитки или пропустить. Соединять уже занятые объекты можно; новый мипл на занятый объект не ставится.</p><p>Завершённая дорога: 1 очко за плитку. Город: 2 за плитку и щит. Монастырь: 9 за окружение восемью плитками. Миплы возвращаются.</p><p>В конце незавершённые города дают 1 за плитку и щит, дороги — 1 за плитку, монастыри — по числу плиток вокруг, включая сам монастырь. Фермеры остаются до конца: по 3 за каждый завершённый город у поля. При равенстве миплов все лидеры получают полные очки.</p></div></details><button id="btn-force-end-game-cc" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-cc" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
     <div class="game-wrap cc-wrap">
       <div id="cc-scores" class="cc-scores"></div>
       <div class="offline-actions" hidden><p class="hint-text">Участник офлайн. Можно ждать его возвращения или завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>
@@ -359,6 +359,21 @@
     </div>
   </section>
 
+  <section id="screen-game-sixnimmt" class="screen">
+    <header class="topbar game-topbar"><strong>Корова 006</strong><button id="btn-sixnimmt-sound-toggle" class="btn-icon" title="Звук хода: включён" aria-label="Звук хода: включён">🔔</button><details class="cc-help"><summary aria-label="Правила игры">?</summary><div><p>Выберите одну карту из руки и подтвердите. Когда готовы все, карты открываются и разыгрываются от меньшей к большей.</p><p>Карта идёт в ряд с ближайшей меньшей последней картой. Шестая карта забирает весь ряд, а сама начинает новый.</p><p>Если карта меньше всех крайних, выберите ряд, который заберёте. Головы на картах — штрафы: обычная карта — 1, кратная 5 — 2, кратная 10 — 3, кратная 11 — 5, а 55 — 7.</p><p>После 10 ходов сдаём новые карты. Игра заканчивается в конце раздачи, в которой кто-то набрал 66 штрафов. Побеждает наименьший счёт.</p></div></details><button id="btn-force-end-game-six" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-six" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
+    <div class="six-wrap">
+      <div id="six-scores" class="six-scores"></div>
+      <div class="offline-actions" hidden><p class="hint-text">Участник офлайн. Ждём возвращения или можно завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>
+      <div class="six-status"><span id="six-round" class="field-label"></span><h2 id="six-instruction" aria-live="polite"></h2><p id="six-detail" class="hint-text"></p></div>
+      <p id="six-error" class="error-text" role="alert" hidden></p>
+      <div id="six-revealed" class="six-revealed"></div>
+      <div id="six-rows" class="six-rows"></div>
+      <section id="six-hand-section"><h3>Ваши карты</h3><div id="six-hand" class="six-hand"></div><button id="six-submit" class="btn btn-primary" disabled>Подтвердить карту</button></section>
+      <button id="six-next" class="btn btn-primary" hidden>Дальше</button>
+      <div id="six-moves" class="six-moves"></div>
+    </div>
+  </section>
+
   <!-- ЭКРАН 4: КОНЕЦ ИГРЫ -->
   <section id="screen-finished" class="screen">
     <div class="finished-wrap">
@@ -374,6 +389,7 @@
     </div>
 
     <div id="battleship-finished-report" hidden></div>
+    <div id="sixnimmt-finished-report" hidden></div>
     <div id="carcassonne-finished-report" hidden></div>
     <div id="codenames-finished-report" class="finished-report" hidden></div>
 
@@ -476,6 +492,7 @@
 <script src="carcassonne-tiles.js"></script>
 <script src="carcassonne.js"></script>
 <script src="battleship.js"></script>
+<script src="sixnimmt.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -2,6 +2,8 @@ const { tiles } = require('../../../public/carcassonne-tiles');
 const { shuffle } = require('../decoder/words');
 const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const key = (x, y) => `${x},${y}`;
+const TILE_SETS = 2;
+const MAX_BOARD_COORDINATE = 144;
 
 class CarcassonneGame {
   constructor(players) {
@@ -19,7 +21,8 @@ class CarcassonneGame {
     this.round = 1;
     this.phase = 'tile';
     this.board = [{ x: 0, y: 0, id: 'D', rotation: 0, meeple: null }];
-    this.deck = shuffle(Object.values(tiles).flatMap(t => Array(t.count - (t.id === 'D' ? 1 : 0)).fill(t.id)));
+    // Два полных набора; одна стартовая D уже лежит на поле.
+    this.deck = shuffle(Object.values(tiles).flatMap(t => Array(t.count * TILE_SETS - (t.id === 'D' ? 1 : 0)).fill(t.id)));
     this.currentTile = null;
     this.lastPlaced = null;
     this.log = [];
@@ -58,7 +61,7 @@ class CarcassonneGame {
 
   legal(x, y, rotation, id = this.currentTile) {
     if (!tiles[id] || !Number.isInteger(rotation) || rotation < 0 || rotation > 3
-      || !Number.isInteger(x) || !Number.isInteger(y) || Math.abs(x) > 72 || Math.abs(y) > 72
+      || !Number.isInteger(x) || !Number.isInteger(y) || Math.abs(x) > MAX_BOARD_COORDINATE || Math.abs(y) > MAX_BOARD_COORDINATE
       || this.at(x, y)) return false;
     const tile = { id, rotation };
     let neighbor = false;
