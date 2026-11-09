@@ -92,6 +92,35 @@ test('real connections enforce identity, invites, origin, validation and multipl
   const detached = update(secondTab, v => !v.players.some(p => p.id === guestAuth.playerId));
   assert.ok((await request(guest, 'create-room', { name: 'Other room' })).ok);
   await detached;
+  // A new visitor opening a private Carcassonne invitation after the start
+  // receives the running board as a spectator, including later moves.
+  const ccHost = await connect(await session());
+  const ccPlayer = await connect(await session());
+  const ccWatcher = await connect(await session());
+  const ccCreated = update(ccHost);
+  assert.ok((await request(ccHost, 'create-room', { name: 'CC Host' })).ok);
+  const ccLobby = await ccCreated;
+  const ccInvite = { roomCode: ccLobby.code, invite: ccLobby.inviteToken };
+  assert.ok((await request(ccHost, 'set-game-type', { gameType: 'carcassonne' })).ok);
+  assert.ok((await request(ccPlayer, 'join-room', { ...ccInvite, name: 'CC Player' })).ok);
+  assert.ok((await request(ccHost, 'start-game')).ok);
+  assert.ok((await request(ccWatcher, 'rejoin-room', { roomCode: ccLobby.code })).error);
+  const ccWatching = update(ccWatcher, v => v.status === 'playing');
+  const ccJoined = await request(ccWatcher, 'join-room', { ...ccInvite, name: 'CC Watcher' });
+  assert.equal(ccJoined.role, 'spectator');
+  const ccView = await ccWatching;
+  assert.equal(ccView.gameType, 'carcassonne');
+  assert.equal(ccView.me.role, 'spectator');
+  assert.equal(ccView.carcassonne.canAct, false);
+  assert.equal(ccView.carcassonne.board.length, 1);
+  assert.equal(ccView.carcassonne.playerIds.length, 2);
+  const placement = ccView.carcassonne.placements[0];
+  assert.ok((await request(ccWatcher, 'carcassonne-tile', { x: placement.x, y: placement.y, rotation: placement.rotations[0] })).error);
+  const ccMoved = update(ccWatcher, v => v.carcassonne.board.length === 2);
+  const ccTurn = ccView.players.find(p => p.id === ccView.carcassonne.currentPlayerId);
+  const ccActor = ccTurn.isHost ? ccHost : ccPlayer;
+  assert.ok((await request(ccActor, 'carcassonne-tile', { x: placement.x, y: placement.y, rotation: placement.rotations[0] })).ok);
+  assert.equal((await ccMoved).status, 'playing');
   // Public queues never expose or use private invitations and have no host.
   const thirdAuth = await session();
   const third = await connect(thirdAuth);

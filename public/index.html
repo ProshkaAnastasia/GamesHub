@@ -111,6 +111,7 @@
   <!-- ЭКРАН 3: ИГРА -->
   <section id="screen-game" class="screen">
     <header class="topbar game-topbar">
+      <button id="btn-decoder-sound-toggle" class="btn-icon" title="Звук хода команды: включён" aria-label="Звук хода команды: включён" aria-pressed="true">🔔</button>
       <div class="scoreboard">
         <div class="score-pill team-a">
           <span class="score-label">А</span>
@@ -167,6 +168,7 @@
 
       <!-- ФАЗА: догадки -->
       <div id="phase-guessing" class="phase-panel">
+        <div id="shared-partner-guesses" hidden aria-live="polite"></div>
         <div class="clues-board">
           <div class="clue-card" id="clue-card-mine">
             <div class="clue-card-head">Подсказки вашей команды</div>
@@ -305,6 +307,7 @@
   <section id="screen-game-codenames" class="screen">
     <header class="topbar game-topbar">
       <strong id="cn-game-title">Codenames</strong>
+      <button id="btn-codenames-sound-toggle" class="btn-icon" title="Звук хода команды: включён" aria-label="Звук хода команды: включён" aria-pressed="true">🔔</button>
       <div id="cn-help" class="cn-help">
         <button id="cn-help-button" class="btn-icon cn-help-button" type="button" aria-label="Правила игры" aria-expanded="false" aria-controls="cn-help-panel">?</button>
         <div id="cn-help-panel" class="cn-help-panel" hidden><strong>Как играть</strong><div id="cn-rules-classic"><p>Капитан даёт одно слово и число. Агенты открывают карточки по одной: своя позволяет продолжать, чужая или мирный житель завершают ход. Убийца — немедленное поражение. Найдите всех своих агентов раньше соперника.</p><p>Обычно доступно число + 1 попыток. Подсказки 0 и ∞ разрешают неограниченные попытки, пока ответы верны. До завершения хода нужно открыть хотя бы одну карточку. Подсказки должны относиться к смыслу слов; однокоренные слова и иные спорные подсказки оценивают сами игроки.</p></div><div id="cn-rules-duet" hidden><p>Вы вместе ищете 15 агентов за 9 ходов. Каждый видит свою секретную карту: 9 агентов, 3 убийцы и мирные жители. Стороны по очереди дают подсказку «слово — число» и угадывают по карте партнёра. Для троих одна сторона состоит из двух игроков.</p><p>Правильных попыток может быть сколько угодно. Мирный житель завершает ход: метка × А или × Б запрещает повтор этой попытки только угадывавшей стороне. Другая сторона ещё может выбрать это слово. Найденный агент закрывается для всех. Убийца — общее поражение.</p><p>Один завершённый ход расходует один жетон. Когда 9 жетонов закончились, наступает последний шанс: обе стороны могут угадывать без новых подсказок. Любая ошибка — поражение. Если все агенты одной карты уже найдены, подсказки дальше даёт только другая сторона.</p></div></div>
@@ -332,7 +335,7 @@
   </section>
 
   <section id="screen-game-carcassonne" class="screen">
-    <header class="topbar game-topbar"><strong>Каркассон</strong><details class="cc-help"><summary aria-label="Правила игры">?</summary><div><p>В свой ход поверните плитку и выберите подсвеченное место. Все края должны совпадать.</p><p>Затем можно поставить одного из 7 миплов на свободный объект новой плитки или пропустить. Соединять уже занятые объекты можно; новый мипл на занятый объект не ставится.</p><p>Завершённая дорога: 1 очко за плитку. Город: 2 за плитку и щит. Монастырь: 9 за окружение восемью плитками. Миплы возвращаются.</p><p>В конце незавершённые города дают 1 за плитку и щит, дороги — 1 за плитку, монастыри — по числу плиток вокруг, включая сам монастырь. Фермеры остаются до конца: по 3 за каждый завершённый город у поля. При равенстве миплов все лидеры получают полные очки.</p></div></details><button id="btn-force-end-game-cc" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-cc" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
+    <header class="topbar game-topbar"><strong>Каркассон</strong><button id="btn-cc-sound-toggle" class="btn-icon" title="Звук хода: включён" aria-label="Звук хода: включён" aria-pressed="true">🔔</button><details class="cc-help"><summary aria-label="Правила игры">?</summary><div><p>В свой ход поверните плитку и выберите подсвеченное место. Все края должны совпадать.</p><p>Затем можно поставить одного из 7 миплов на свободный объект новой плитки или пропустить. Соединять уже занятые объекты можно; новый мипл на занятый объект не ставится.</p><p>Завершённая дорога: 1 очко за плитку. Город: 2 за плитку и щит. Монастырь: 9 за окружение восемью плитками. Миплы возвращаются.</p><p>В конце незавершённые города дают 1 за плитку и щит, дороги — 1 за плитку, монастыри — по числу плиток вокруг, включая сам монастырь. Фермеры остаются до конца: по 3 за каждый завершённый город у поля. При равенстве миплов все лидеры получают полные очки.</p></div></details><button id="btn-force-end-game-cc" class="btn-icon" title="Завершить партию" hidden>🏁</button><button id="btn-leave-game-cc" class="btn-icon" title="Выйти из комнаты">🚪</button></header>
     <div class="game-wrap cc-wrap">
       <div id="cc-scores" class="cc-scores"></div>
       <div class="offline-actions" hidden><p class="hint-text">Участник офлайн. Можно ждать его возвращения или завершить партию.</p><button class="btn btn-secondary btn-end-offline">Завершить партию</button></div>

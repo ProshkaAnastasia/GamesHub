@@ -60,6 +60,31 @@
     const edges=[0,1,2,3].map(e=>cities.some(c=>c.includes(e))?'city':roads.some(r=>r.includes(e))?'road':'field');
     tiles[id]={id,count,features,edges,monastery};
   }
+  // Placement anchors matched to the PNG artwork in its unrotated orientation.
+  // Apply after field generation: visual positions must not change connectivity.
+  const artworkAnchors={
+    A:{m:[50,39],f0:[75,70]},
+    B:{m:[50,39],f0:[75,70]},
+    D:{f0:[50,35],f1:[50,75]},
+    F:{f0:[85,50],f1:[15,50]},
+    G:{f0:[85,50],f1:[15,50]},
+    J:{f0:[72,34],f1:[72,78]},
+    K:{f0:[72,43],f1:[25,78]},
+    L:{f0:[50,33],f1:[25,78],f2:[75,78]},
+    M:{f0:[28,72]},
+    N:{f0:[28,72]},
+    O:{f0:[74,91],f1:[22,78]},
+    P:{f0:[74,91],f1:[22,78]},
+    U:{f0:[22,55],f1:[78,55]},
+    V:{f0:[28,72],f1:[73,28]},
+    W:{f0:[25,25],f1:[75,25],f2:[50,80]},
+    X:{f0:[25,25],f1:[75,25],f2:[25,75],f3:[75,75]},
+  };
+  for(const [id,anchors] of Object.entries(artworkAnchors)){
+    for(const [featureId,anchor] of Object.entries(anchors)){
+      tiles[id].features.find(f=>f.id===featureId).anchor=anchor;
+    }
+  }
   const api={tiles,rotatePoint};
   if(typeof module!=='undefined')module.exports=api;else root.CarcassonneTiles=api;
 })(typeof window!=='undefined'?window:globalThis);

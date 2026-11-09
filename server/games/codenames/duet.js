@@ -1,4 +1,5 @@
-const { WORDS, shuffle } = require('../decoder/words');
+const { shuffle } = require('../decoder/words');
+const { WORDS } = require('./words');
 const SIDES = ['A', 'B'];
 const other = side => side === 'A' ? 'B' : 'A';
 const normalize = word => word.toLocaleLowerCase('ru').replaceAll('ё', 'е');

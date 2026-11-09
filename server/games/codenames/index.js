@@ -1,5 +1,6 @@
 // Standalone Codenames rules. Only viewFor exposes data to clients.
-const { WORDS, shuffle } = require('../decoder/words');
+const { shuffle } = require('../decoder/words');
+const { WORDS } = require('./words');
 const DuetGame = require('./duet');
 const TEAMS = ['A', 'B'];
 const other = team => team === 'A' ? 'B' : 'A';

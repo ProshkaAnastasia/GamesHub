@@ -87,6 +87,43 @@ test('shared player alternates teams, sees both word sets, never receives the ot
   assert.equal(game.phase, 'reveal');
 });
 
+test('shared player sees both partners live guesses and locks without revealing secret codes', () => {
+  const room = setup();
+  assert.equal(room.viewFor('shared').teamView.partnerGuesses, null);
+  for (let round = 1; round <= 2; round++) {
+    clues(room);
+    const ownTeam = round === 1 ? 'A' : 'B';
+    const ownPartner = ownTeam.toLowerCase();
+    assert.ok(room.updateGuessDraft(ownPartner, 'own', [3, null, 1]).ok);
+    assert.ok(room.updateGuessDraft('a', 'intercept', [1, 2, 3]).ok);
+    assert.ok(room.updateGuessDraft('b', 'intercept', [4, 3, 2]).ok);
+    let tv = room.viewFor('shared').teamView;
+    const partner = tv.partnerGuesses.find(p => p.team === ownTeam);
+    assert.deepEqual(partner.ownGuess, [3, null, 1]);
+    assert.equal(partner.ownLocked, false);
+    assert.equal(tv.partnerGuesses.find(p => p.team !== ownTeam).ownGuess, null);
+    assert.deepEqual(tv.partnerGuesses[0].interceptGuess, [1, 2, 3]);
+    assert.deepEqual(tv.partnerGuesses[1].interceptGuess, [4, 3, 2]);
+    assert.equal(tv.myCode, null);
+    assert.ok(tv.partnerGuesses.every(p => !('code' in p)));
+    assert.equal(room.viewFor('a').teamView.partnerGuesses, null);
+    room.joinInProgress('watch', 'Watcher');
+    assert.equal(room.viewFor('watch').teamView, null);
+    assert.ok(room.lockGuess('a', 'intercept').ok);
+    assert.equal(room.viewFor('shared').teamView.partnerGuesses[0].interceptLocked, true);
+    assert.ok(room.updateGuessDraft(ownPartner, 'own', [3, 2, 1]).ok);
+    assert.ok(room.lockGuess(ownPartner, 'own').ok);
+    assert.equal(room.viewFor('shared').teamView.partnerGuesses.find(p => p.team === ownTeam).ownLocked, true);
+    if (round === 1) {
+      assert.ok(room.updateGuessDraft('shared', 'own', room.game.teams.B.current.code).ok);
+      assert.ok(room.lockGuess('shared', 'own').ok);
+      assert.ok(room.lockGuess('b', 'intercept').ok);
+      assert.equal(room.game.phase, 'reveal');
+      assert.ok(room.nextRound().ok);
+    }
+  }
+});
+
 test('shared role and alternating roles survive serialization and play again', () => {
   const room = setup();
   clues(room);

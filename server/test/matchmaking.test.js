@@ -81,6 +81,18 @@ test('Ticket to Ride counts and deals only connected participants', () => {
   assert.equal(room.status, 'playing');
 });
 
+test('late Ticket to Ride arrivals spectate without changing the game or ending it on leave', () => {
+  const room = publicRoom('ttr', 2);
+  assert.ok(room.startGame().ok);
+  const before = JSON.stringify(room.game);
+  const watcher = room.joinInProgress('watch', 'Watcher');
+  assert.equal(watcher.role, 'spectator');
+  assert.equal(JSON.stringify(room.game), before);
+  assert.equal(room.viewFor('watch').me.role, 'spectator');
+  room.removePlayer('watch');
+  assert.equal(room.status, 'playing');
+});
+
 test('offline participants may return without changing status or roles after restore', () => {
   const room = publicRoom();
   room.startGame();

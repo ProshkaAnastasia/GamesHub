@@ -581,6 +581,18 @@ class DecoderGame {
     const teamView = {
       myTeamKey: me.team,
       isSharedPlayer: playerId === this.sharedPlayerId,
+      partnerGuesses: playerId === this.sharedPlayerId && this.phase === 'guessing'
+        ? ['A', 'B'].map(team => {
+          const partnerId = this.teamOrder[team][0];
+          const current = this.teams[team].current;
+          return {
+            team, name: this.players.get(partnerId)?.name || '',
+            ownGuess: partnerId !== this.getEncryptorId(team) ? current.ownGuess : null,
+            ownLocked: current.ownLocked,
+            interceptGuess: current.interceptGuess,
+            interceptLocked: current.interceptLocked,
+          };
+        }) : null,
       myWords: myTeam.words,
       // слова соперника — секрет, пока игра не окончена; на финальном
       // экране прятать их больше не от кого

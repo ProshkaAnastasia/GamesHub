@@ -207,8 +207,7 @@ io.on('connection', (socket) => {
     if (!detachRoom(socket, cb)) return;
     const playerId = socket.data.playerId;
     const trimmedName = (name || 'Игрок').trim() || 'Игрок';
-    // партия уже идёт — подключаем зрителем, а если это TTR и она ещё
-    // позволяет добавить живого игрока (см. Room.joinInProgress) — игроком
+    // После старта новые участники подключаются зрителями.
     const player = room.status === 'lobby'
       ? room.addPlayer(playerId, trimmedName)
       : room.joinInProgress(playerId, trimmedName);

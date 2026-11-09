@@ -9,6 +9,8 @@
     chatOpen: false,
     gamesOpen: false,
     ttrLastCurrentPlayerId: null,
+    ccLastTurnKey: null,
+    teamLastTurnKey: null,
   };
 
   // ---------- утилиты ----------
@@ -33,7 +35,7 @@
     el.hidden = !message;
   }
 
-  // ---------- звук уведомления о своём ходе (TTR) ----------
+  // ---------- звук уведомления о своём ходе ----------
   function getTtrSoundEnabled() {
     try { return localStorage.getItem('ttr_sound_enabled') !== '0'; } catch (e) { return true; }
   }
@@ -41,12 +43,69 @@
     try { localStorage.setItem('ttr_sound_enabled', enabled ? '1' : '0'); } catch (e) {}
   }
   let ttrAudioCtx = null;
+  function getTurnAudioContext() {
+    if (!ttrAudioCtx || ttrAudioCtx.state === 'closed') {
+      ttrAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return ttrAudioCtx;
+  }
+  function unlockTurnAudio() {
+    try {
+      const ctx = getTurnAudioContext();
+      if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    } catch (e) { /* Звук может быть недоступен в браузере. */ }
+  }
+  // Создаём и разблокируем аудио во время действия пользователя,
+  // до того как уведомление о ходе придёт по сокету.
+  document.addEventListener('click', unlockTurnAudio, { capture: true });
+  document.addEventListener('keydown', unlockTurnAudio, { capture: true });
   function playTtrTurnSound() {
     if (!getTtrSoundEnabled()) return;
+    playTurnSound();
+  }
+  function getCcSoundEnabled() {
+    try { return localStorage.getItem('cc_sound_enabled') !== '0'; } catch (e) { return true; }
+  }
+  function getTeamSoundEnabled(gameType) {
+    try { return localStorage.getItem(`${gameType}_sound_enabled`) !== '0'; } catch (e) { return true; }
+  }
+  function updateTeamTurnSound(view) {
+    let active = false;
+    let phaseKey = view.phase;
+    if (view.status === 'playing' && view.me && view.me.role !== 'spectator') {
+      if (view.gameType === 'decoder' && view.teamView) {
+        const tv = view.teamView;
+        active = (view.phase === 'clue-giving' && !tv.mySubmittedClues && view.loneTeam !== tv.myTeamKey)
+          || view.phase === 'guessing'
+          || (view.phase === 'tiebreak' && !tv.isSharedPlayer);
+      } else if (view.gameType === 'codenames' && view.codenames) {
+        const game = view.codenames;
+        const side = game.mode === 'duet' ? game.ownSide : view.me.team;
+        const actingTeam = game.mode === 'duet' && view.phase === 'guessing'
+          ? (game.activeTeam === 'A' ? 'B' : 'A') : game.activeTeam;
+        active = ['clue', 'guessing'].includes(view.phase) && !!side && side === actingTeam;
+        if (game.mode === 'duet' && view.phase === 'sudden-death') active = !!game.canGuess;
+        phaseKey = `${view.phase}:${game.activeTeam}`;
+      }
+    }
+    const key = view.status === 'playing' && ['decoder', 'codenames'].includes(view.gameType)
+      ? `${view.code}:${view.gameType}:${view.pastGames?.length || 0}:${view.round}:${phaseKey}` : null;
+    if (active && key !== state.teamLastTurnKey && getTeamSoundEnabled(view.gameType)) playTurnSound();
+    state.teamLastTurnKey = key;
+  }
+  function updateCcTurnSound(view) {
+    const game = view.status === 'playing' && view.gameType === 'carcassonne' ? view.carcassonne : null;
+    const turnKey = game ? `${view.code}:${view.pastGames?.length || 0}:${view.round}:${game.currentPlayerId}` : null;
+    if (game?.canAct && view.me?.role !== 'spectator' && turnKey !== state.ccLastTurnKey && getCcSoundEnabled()) {
+      playTurnSound();
+    }
+    state.ccLastTurnKey = turnKey;
+  }
+  async function playTurnSound() {
     try {
-      ttrAudioCtx = ttrAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      const ctx = ttrAudioCtx;
-      if (ctx.state === 'suspended') ctx.resume();
+      const ctx = getTurnAudioContext();
+      if (ctx.state !== 'running') await ctx.resume();
+      if (ctx.state !== 'running') return;
       const now = ctx.currentTime;
       // короткое восходящее «динь-дон» из двух тонов, без файлов-ассетов
       [880, 1175].forEach((freq, i) => {
@@ -304,6 +363,40 @@
   });
   renderTtrSoundToggle();
 
+  const btnCcSoundToggle = $('#btn-cc-sound-toggle');
+  function renderCcSoundToggle() {
+    const enabled = getCcSoundEnabled();
+    btnCcSoundToggle.textContent = enabled ? '🔔' : '🔕';
+    btnCcSoundToggle.title = enabled ? 'Звук хода: включён' : 'Звук хода: выключен';
+    btnCcSoundToggle.setAttribute('aria-label', btnCcSoundToggle.title);
+    btnCcSoundToggle.setAttribute('aria-pressed', String(enabled));
+  }
+  btnCcSoundToggle.addEventListener('click', () => {
+    const enabled = !getCcSoundEnabled();
+    try { localStorage.setItem('cc_sound_enabled', enabled ? '1' : '0'); } catch (e) {}
+    renderCcSoundToggle();
+    if (enabled) playTurnSound();
+  });
+  renderCcSoundToggle();
+
+  for (const gameType of ['decoder', 'codenames']) {
+    const button = $(`#btn-${gameType}-sound-toggle`);
+    const render = () => {
+      const enabled = getTeamSoundEnabled(gameType);
+      button.textContent = enabled ? '🔔' : '🔕';
+      button.title = enabled ? 'Звук хода команды: включён' : 'Звук хода команды: выключен';
+      button.setAttribute('aria-label', button.title);
+      button.setAttribute('aria-pressed', String(enabled));
+    };
+    button.addEventListener('click', () => {
+      const enabled = !getTeamSoundEnabled(gameType);
+      try { localStorage.setItem(`${gameType}_sound_enabled`, enabled ? '1' : '0'); } catch (e) {}
+      render();
+      if (enabled) playTurnSound();
+    });
+    render();
+  }
+
   async function forceEndGame() {
     if (!confirm('Завершить текущую игру для всех? Победитель не будет определён.')) return;
     const res = await emit('force-end-game', {});
@@ -460,13 +553,20 @@
   }
 
   function renderRoster(view) {
-    $('#roster-row').innerHTML = view.players.map(p => `
-      <span class="roster-chip team-${(p.team || '').toLowerCase()} ${p.connected ? '' : 'offline'}">
+    const myTeam = view.me?.role !== 'spectator' ? view.teamView?.myTeamKey : null;
+    const sharedEncryptingTeam = view.round % 2 ? 'A' : 'B';
+    const sharedTeam = view.phase === 'clue-giving' ? sharedEncryptingTeam : (sharedEncryptingTeam === 'A' ? 'B' : 'A');
+    $('#roster-row').innerHTML = view.players.map(p => {
+      const team = p.id === view.sharedPlayerId ? sharedTeam : p.team;
+      const teammate = !!myTeam && team === myTeam && p.role !== 'spectator';
+      return `
+      <span class="roster-chip team-${(team || '').toLowerCase()} ${teammate ? 'roster-teammate' : ''} ${p.connected ? '' : 'offline'}"${teammate ? ' title="Ваша команда"' : ''}>
         <span class="dot"></span>${escapeHtml(p.name)}${p.connected ? '' : ' (офлайн)'}
+        ${p.id === view.me?.id ? '<span class="player-tag-you">вы</span>' : ''}
         ${p.team === 'AB' ? '<span class="player-tag-host">общий игрок</span>' : ''}
         ${p.role === 'spectator' ? '<span class="player-tag-spectator">зритель</span>' : ''}
       </span>
-    `).join('');
+    `; }).join('');
   }
 
   function renderGame(view) {
@@ -597,6 +697,18 @@
   });
 
   function renderGuessing(view, tv) {
+    const partnerGuesses = $('#shared-partner-guesses');
+    partnerGuesses.hidden = !tv.isSharedPlayer;
+    partnerGuesses.innerHTML = tv.isSharedPlayer ? `
+      <h3>Ответы партнёров</h3>
+      <div class="guess-boards">${(tv.partnerGuesses || []).map(partner => {
+        const answer = (label, guess, locked) => `<p>${label}: <strong class="mono">${guess.map(digit => digit ?? '?').join(' — ')}</strong> · ${locked ? 'Подтверждено ✓' : 'Выбирает'}</p>`;
+        return `<div class="guess-board">
+          <div class="guess-board-head">${escapeHtml(partner.name)} · команда ${partner.team === 'A' ? 'А' : 'Б'}</div>
+          ${partner.ownGuess ? answer('Свой код', partner.ownGuess, partner.ownLocked) : ''}
+          ${answer('Перехват', partner.interceptGuess, partner.interceptLocked)}
+        </div>`;
+      }).join('')}</div>` : '';
     const oppTeamKey = tv.myTeamKey === 'A' ? 'B' : 'A';
     const isLoneMe = view.loneTeam === tv.myTeamKey;
     const oppIsLone = view.loneTeam === oppTeamKey;
@@ -2626,6 +2738,8 @@
 
   // ---------- маршрутизация состояния ----------
   function applyRoomUpdate(view) {
+    updateCcTurnSound(view);
+    updateTeamTurnSound(view);
     state.lastView = view;
     currentRoomCode = view.code;
     saveRoomCache(view);

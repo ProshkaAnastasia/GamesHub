@@ -127,7 +127,7 @@
         const sudden = view.phase === 'sudden-death';
         $('#cn-status').innerHTML = `<div class="cn-scores"><span>Найдено ${15 - game.totalRemaining} из 15 агентов</span><span>Ходов: ${game.tokensLeft}</span></div><strong>${sudden ? 'Последний шанс — без новых подсказок' : `Сторона ${teamLabel(game.activeTeam)} подсказывает · сторона ${teamLabel(game.activeTeam === 'A' ? 'B' : 'A')} угадывает`}</strong><p>${game.clue ? `${escape(game.clue.word)} — ${game.clue.count === 'unlimited' ? '∞' : game.clue.count}. Угадывайте, пока ответы верны.` : sudden ? 'Угадывать можно обеим сторонам. Любая ошибка завершит миссию.' : 'Ждём подсказку'}</p>`;
         $('#cn-role').textContent = game.isDuetPlayer
-          ? `Вы на стороне ${teamLabel(game.ownSide)}. Видите свою секретную карту; ваши ответы проверяются по карте партнёра. ${game.remaining[game.ownSide] === 0 ? 'Все агенты вашей карты найдены.' : `На вашей карте осталось ${game.remaining[game.ownSide]} агентов для подсказок.`}`
+          ? `Вы на стороне ${teamLabel(game.ownSide)}. Видите свою секретную карту; ваши ответы проверяются по карте партнёра. ${game.remaining[game.ownSide] === 0 ? 'Все агенты вашей карты найдены: теперь только партнёр даёт подсказки, а вы угадываете.' : game.completedSides?.[game.ownSide === 'A' ? 'B' : 'A'] ? 'Все агенты карты партнёра найдены: теперь вы даёте подсказки каждый ход, а партнёр угадывает.' : `На вашей карте осталось ${game.remaining[game.ownSide]} агентов для подсказок.`}`
           : 'Вы наблюдаете за совместной миссией.';
       }
       const boardKey = `${view.code}:${view.pastGames.length}`;

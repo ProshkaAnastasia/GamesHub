@@ -433,6 +433,17 @@ h1 {
 .roster-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
 .roster-chip.offline { opacity: 0.5; filter: grayscale(1); }
 .roster-chip.offline .dot { background: var(--text-muted); }
+#roster-row .roster-teammate {
+  --roster-team-color: var(--team-a);
+  color: var(--text);
+  font-weight: 700;
+  border: 2px solid var(--roster-team-color);
+  background: color-mix(in srgb, var(--roster-team-color) 24%, var(--panel));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--roster-team-color) 35%, transparent);
+}
+#roster-row .roster-teammate.team-b { --roster-team-color: var(--team-b); }
+#roster-row .roster-teammate .dot { background: var(--roster-team-color); }
+#roster-row .roster-teammate.offline { opacity: .65; filter: none; border-style: dashed; box-shadow: none; }
 
 .pause-banner {
   background: rgba(227, 87, 102, 0.12);

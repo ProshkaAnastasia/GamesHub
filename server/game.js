@@ -57,20 +57,12 @@ class Room {
     return player;
   }
 
-  // вход в уже идущую партию (status !== 'lobby') — отдельный путь от
-  // addPlayer выше: по умолчанию зритель, но если это TTR и партия ещё
-  // позволяет добавить живого игрока (не финальный круг, есть свободное
-  // место) — TicketToRideGame.addPlayer сам раздаст стартовую руку/билеты
-  // "с колёс", и роль станет 'player'. Декодер такого метода не имеет —
-  // там подключение всегда зрителем (см. CLAUDE.md/план про причины)
+  // Новые участники после старта наблюдают за партией во всех играх.
+  // Возвращение прежних участников проходит отдельно через rejoin-room.
   joinInProgress(id, name) {
     const player = { id, name: name.slice(0, 20), team: null, connected: true, role: 'spectator' };
     this.players.set(id, player);
     if (this.visibility === 'private' && !this.hostId) this.hostId = id;
-    if (this.gameType === 'ttr' && this.game && typeof this.game.addPlayer === 'function') {
-      const res = this.game.addPlayer(id);
-      if (res.ok) player.role = 'player';
-    }
     return player;
   }
 
