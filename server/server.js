@@ -445,6 +445,15 @@ io.on('connection', (socket) => {
     if (result.ok) broadcastRoom(room);
   });
 
+  onEvent('monopoly-action', (payload, cb) => {
+    const session = sessions.get(socket.id);
+    const room = session && manager.get(session.roomCode);
+    if (!room || room.gameType !== 'monopoly') return cb({ error: 'Сейчас нет партии «Монополия»' });
+    const result = room.monopolyAction(session.playerId, payload);
+    cb(result);
+    if (result.ok) broadcastRoom(room);
+  });
+
   onEvent('force-end-game', (_, cb) => {
     const s = sessions.get(socket.id);
     const room = s && manager.get(s.roomCode);

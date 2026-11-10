@@ -83,7 +83,15 @@ function validPayload(event, p) {
   if (!obj(p)) return false;
   if (emptyEvents.has(event)) return true;
   switch (event) {
-    case 'find-game': return str(p.name, 80) && ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad'].includes(p.gameType);
+    case 'find-game': return str(p.name, 80) && ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad', 'monopoly'].includes(p.gameType);
+    case 'monopoly-action': {
+      const simple = ['roll','end','buy','auction','pass','bankrupt','jail-pay','jail-card','trade-accept','trade-reject'];
+      if (simple.includes(p.action)) return true;
+      if (['build','sell','mortgage','redeem','sell-group'].includes(p.action)) return Number.isInteger(p.index) && p.index >= 0 && p.index < 40;
+      if (p.action === 'bid') return Number.isInteger(p.amount) && p.amount > 0 && p.amount <= 1000000;
+      if (p.action === 'trade-offer') return str(p.target,100) && [p.give,p.take].every(a => Array.isArray(a) && a.length <= 28 && a.every(i => Number.isInteger(i) && i >= 0 && i < 40)) && [p.cashGive,p.cashTake].every(n => Number.isInteger(n) && n >= 0 && n <= 1000000) && [p.freeGive ?? 0,p.freeTake ?? 0].every(n => Number.isInteger(n) && n >= 0 && n <= 2);
+      return false;
+    }
     case 'railroad-place': return ((Number.isInteger(p.source) && p.source >= 0 && p.source < 4) || ['special-highway','special-railway','special-three-highways','special-three-railways','special-station-adjacent','special-station-opposite'].includes(p.source)) && [p.x,p.y].every(n => Number.isInteger(n) && n >= 0 && n < 7) && Number.isInteger(p.rotation) && p.rotation >= 0 && p.rotation < 4 && typeof p.flipped === 'boolean';
     case 'cryptid-mark':
     case 'cryptid-search': return Number.isInteger(p.cell) && p.cell >= 0 && p.cell < 108;
@@ -100,7 +108,7 @@ function validPayload(event, p) {
     case 'join-room': return str(p.name, 80) && code(p.roomCode) && (p.invite === undefined || str(p.invite, 100));
     case 'rejoin-room': return code(p.roomCode);
     case 'choose-team': return ['A', 'B', 'AB'].includes(p.team);
-    case 'set-game-type': return ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad'].includes(p.gameType);
+    case 'set-game-type': return ['decoder', 'ttr', 'codenames', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad', 'monopoly'].includes(p.gameType);
     case 'submit-clues': return words(p.clues, 3, 60);
     case 'update-guess': return ['own', 'intercept'].includes(p.kind) && Array.isArray(p.guess) && p.guess.length === 3 && p.guess.every(n => n === null || (Number.isInteger(n) && n >= 1 && n <= 4));
     case 'lock-guess': return ['own', 'intercept'].includes(p.kind);

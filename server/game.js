@@ -256,6 +256,7 @@ class Room {
   cryptidQuestion(id, target, cell) { return this._delegate('question', id, target, cell); }
   cryptidSearch(id, cell) { return this._delegate('search', id, cell); }
   railroadPlace(id, source, x, y, rotation, flipped) { return this._delegate('place', id, source, x, y, rotation, flipped); }
+  monopolyAction(id, payload) { return this._delegate('dispatch', id, payload); }
   railroadUndo(id) { return this._delegate('undo', id); }
   railroadFinishRound(id) { return this._delegate('finishRound', id); }
 

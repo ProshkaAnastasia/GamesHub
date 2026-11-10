@@ -8,6 +8,7 @@ const battleship = require('./battleship');
 const sixnimmt = require('./sixnimmt');
 const cryptid = require('./cryptid');
 const railroad = require('./railroad');
+const monopoly = require('./monopoly');
 
 const GAME_MODULES = {
   [decoder.id]: decoder,
@@ -18,6 +19,7 @@ const GAME_MODULES = {
   [sixnimmt.id]: sixnimmt,
   [cryptid.id]: cryptid,
   [railroad.id]: railroad,
+  [monopoly.id]: monopoly,
 };
 
 const DEFAULT_GAME_TYPE = decoder.id;

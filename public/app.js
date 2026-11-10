@@ -266,7 +266,7 @@
     const rooms = res.rooms || [];
     wrap.hidden = rooms.length === 0;
     wrap.innerHTML = rooms.map(room => `
-      <button class="btn btn-secondary resume-room" data-code="${escapeHtml(room.code)}">${room.status === 'finished' ? 'Посмотреть завершённую игру' : 'Вернуться в игру'} · ${room.gameType === 'railroad' ? 'Railroad Ink' : room.gameType === 'cryptid' ? 'Криптид' : room.gameType === 'sixnimmt' ? 'Корова 006' : room.gameType === 'battleship' ? 'Морской бой' : room.gameType === 'carcassonne' ? 'Каркассон' : room.gameType === 'codenames' ? 'Codenames' : room.gameType === 'ttr' ? 'Ticket to Ride' : room.gameType === 'decoder' ? 'Декодер' : 'Приватная комната'} · ${escapeHtml(room.code)}</button>
+      <button class="btn btn-secondary resume-room" data-code="${escapeHtml(room.code)}">${room.status === 'finished' ? 'Посмотреть завершённую игру' : 'Вернуться в игру'} · ${room.gameType === 'monopoly' ? 'Монополия' : room.gameType === 'railroad' ? 'Railroad Ink' : room.gameType === 'cryptid' ? 'Криптид' : room.gameType === 'sixnimmt' ? 'Корова 006' : room.gameType === 'battleship' ? 'Морской бой' : room.gameType === 'carcassonne' ? 'Каркассон' : room.gameType === 'codenames' ? 'Codenames' : room.gameType === 'ttr' ? 'Ticket to Ride' : room.gameType === 'decoder' ? 'Декодер' : 'Приватная комната'} · ${escapeHtml(room.code)}</button>
     `).join('');
     wrap.querySelectorAll('.resume-room').forEach(button => button.addEventListener('click', async () => {
       const result = await emit('rejoin-room', { roomCode: button.dataset.code });
@@ -351,6 +351,8 @@
   $('#btn-leave-game-ttr').addEventListener('click', leaveRoom);
   $('#btn-leave-game-cn').addEventListener('click', leaveRoom);
   $('#btn-leave-game-cc').addEventListener('click', leaveRoom);
+  $('#btn-leave-game-monopoly').addEventListener('click', leaveRoom);
+  $('#btn-force-end-game-monopoly').addEventListener('click', forceEndGame);
   $('#btn-leave-game-railroad').addEventListener('click', leaveRoom);
   $('#btn-force-end-game-railroad').addEventListener('click', forceEndGame);
   $('#btn-leave-game-cryptid').addEventListener('click', leaveRoom);
@@ -389,12 +391,12 @@
   });
   renderCcSoundToggle();
 
-  for (const gameType of ['decoder', 'codenames', 'sixnimmt', 'cryptid', 'railroad']) {
+  for (const gameType of ['decoder', 'codenames', 'sixnimmt', 'cryptid', 'railroad', 'monopoly']) {
     const button = $(`#btn-${gameType}-sound-toggle`);
     const render = () => {
       const enabled = getTeamSoundEnabled(gameType);
       button.textContent = enabled ? '🔔' : '🔕';
-      button.title = `${['sixnimmt', 'cryptid', 'railroad'].includes(gameType) ? 'Звук хода' : 'Звук хода команды'}: ${enabled ? 'включён' : 'выключен'}`;
+      button.title = `${['sixnimmt', 'cryptid', 'railroad', 'monopoly'].includes(gameType) ? 'Звук хода' : 'Звук хода команды'}: ${enabled ? 'включён' : 'выключен'}`;
       button.setAttribute('aria-label', button.title);
       button.setAttribute('aria-pressed', String(enabled));
     };
@@ -420,7 +422,7 @@
   function updateLeaveButtons(view) {
     const safe = view.canLeaveSafely?.safe !== false;
     const reason = view.canLeaveSafely?.reason;
-    [$('#btn-leave-lobby'), $('#btn-leave-game'), $('#btn-leave-game-ttr'), $('#btn-leave-game-cn'), $('#btn-leave-game-cc'), $('#btn-leave-game-bs'), $('#btn-leave-game-six'), $('#btn-leave-game-cryptid'), $('#btn-leave-game-railroad')].forEach((btn) => {
+    [$('#btn-leave-lobby'), $('#btn-leave-game'), $('#btn-leave-game-ttr'), $('#btn-leave-game-cn'), $('#btn-leave-game-cc'), $('#btn-leave-game-bs'), $('#btn-leave-game-six'), $('#btn-leave-game-cryptid'), $('#btn-leave-game-railroad'), $('#btn-leave-game-monopoly')].forEach((btn) => {
       btn.disabled = !safe;
       btn.title = safe ? 'Выйти из комнаты' : reason;
     });
@@ -1209,7 +1211,7 @@
     }
     $('#games-list-content').innerHTML = [...games].reverse().map(g => {
       const isDraw = g.winner === 'draw';
-      const title = g.railroad ? (isDraw ? 'Разделённая победа' : `Railroad Ink: ${escapeHtml(g.railroad.names[g.winner] || '')}`) : g.cryptid ? (isDraw ? 'Партия завершена' : `Открытие: ${escapeHtml(g.cryptid.names[g.winner] || '')}`) : g.sixnimmt ? (isDraw ? 'Разделённая победа' : `Победа: ${escapeHtml(g.sixnimmt.names[g.winner] || '')}`) : g.battleship ? (isDraw ? 'Ничья' : `Победа: ${escapeHtml(g.battleship.names[g.winner] || '')}`) : g.carcassonne ? (isDraw ? 'Ничья' : `Победа: ${escapeHtml(g.carcassonne.names[g.winner] || '')}`) : g.codenames?.mode === 'duet' ? (g.winner === 'coop-win' ? 'Миссия выполнена' : isDraw ? 'Партия завершена' : 'Миссия провалена') : isDraw ? 'Ничья' : `Победа команды ${g.winner === 'A' ? 'А' : 'Б'}`;
+      const title = g.monopoly ? (isDraw ? 'Партия завершена' : `Победа: ${escapeHtml(g.monopoly.names[g.winner] || '')}`) : g.railroad ? (isDraw ? 'Разделённая победа' : `Railroad Ink: ${escapeHtml(g.railroad.names[g.winner] || '')}`) : g.cryptid ? (isDraw ? 'Партия завершена' : `Открытие: ${escapeHtml(g.cryptid.names[g.winner] || '')}`) : g.sixnimmt ? (isDraw ? 'Разделённая победа' : `Победа: ${escapeHtml(g.sixnimmt.names[g.winner] || '')}`) : g.battleship ? (isDraw ? 'Ничья' : `Победа: ${escapeHtml(g.battleship.names[g.winner] || '')}`) : g.carcassonne ? (isDraw ? 'Ничья' : `Победа: ${escapeHtml(g.carcassonne.names[g.winner] || '')}`) : g.codenames?.mode === 'duet' ? (g.winner === 'coop-win' ? 'Миссия выполнена' : isDraw ? 'Партия завершена' : 'Миссия провалена') : isDraw ? 'Ничья' : `Победа команды ${g.winner === 'A' ? 'А' : 'Б'}`;
       const when = new Date(g.finishedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       return `
         <button class="games-list-item" data-game="${g.gameNumber}">
@@ -1227,6 +1229,14 @@
   }
 
   function renderGameDetail(view, game) {
+    if (game.gameType === 'monopoly') {
+      $('#games-list-content').hidden = true;
+      $('#games-detail-content').hidden = false;
+      $('#games-detail-title').textContent = `Монополия · Москва — игра ${game.gameNumber}`;
+      $('#games-detail-assoc').innerHTML = '';
+      window.MonopolyUI.report(game.monopoly, '#games-detail-history');
+      return;
+    }
     if (game.gameType === 'railroad') {
       $('#games-list-content').hidden = true;
       $('#games-detail-content').hidden = false;
@@ -1305,13 +1315,14 @@
 
   // ---------- ЭКРАН: конец игры ----------
   function renderFinished(view) {
+    $('#monopoly-finished-report').hidden = view.gameType !== 'monopoly';
     $('#railroad-finished-report').hidden = view.gameType !== 'railroad';
     $('#cryptid-finished-report').hidden = view.gameType !== 'cryptid';
     $('#sixnimmt-finished-report').hidden = view.gameType !== 'sixnimmt';
     $('#battleship-finished-report').hidden = view.gameType !== 'battleship';
     $('#carcassonne-finished-report').hidden = view.gameType !== 'carcassonne';
     $('#codenames-finished-report').hidden = view.gameType !== 'codenames';
-    const isTtr = ['ttr', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad'].includes(view.gameType);
+    const isTtr = ['ttr', 'carcassonne', 'battleship', 'sixnimmt', 'cryptid', 'railroad', 'monopoly'].includes(view.gameType);
     const isDraw = view.winner === 'draw';
     const won = isTtr ? (view.winner === view.me?.id) : (!isDraw && view.me?.team && view.winner === view.me.team);
     $('#finished-title').textContent = isDraw
@@ -1331,6 +1342,13 @@
         : 'Ждём хоста…';
     }
 
+    if (view.gameType === 'monopoly') {
+      $('#finished-report').hidden = true;
+      $('#ttr-finished-report').hidden = true;
+      $('#btn-toggle-history-finished').hidden = true;
+      window.MonopolyUI.report(view.monopoly, '#monopoly-finished-report');
+      return;
+    }
     if (view.gameType === 'railroad') {
       $('#finished-report').hidden = true;
       $('#ttr-finished-report').hidden = true;
@@ -2805,6 +2823,11 @@
   // ---------- маршрутизация состояния ----------
   function applyRoomUpdate(view) {
     updateCcTurnSound(view);
+    const mp = view.status === 'playing' && view.gameType === 'monopoly' ? view.monopoly : null;
+    const mpActor = mp ? (mp.auction?.turn || mp.debt?.from || mp.currentPlayerId) : null;
+    const mpKey = mp ? `${view.code}:${view.pastGames.length}:${view.round}:${mpActor}` : null;
+    if (mp?.canAct && mpActor === view.me?.id && mpKey !== state.monopolyTurnKey && getTeamSoundEnabled('monopoly')) playTurnSound();
+    state.monopolyTurnKey = mpKey;
     const railroad = view.status === 'playing' && view.gameType === 'railroad' ? view.railroad : null;
     const railroadKey = railroad ? `${view.code}:${view.pastGames.length}:${view.round}` : null;
     if (railroad?.canBuild && railroadKey !== state.railroadLastRoundKey && getTeamSoundEnabled('railroad')) playTurnSound();
@@ -2843,6 +2866,9 @@
       $('#history-panel').hidden = true;
       showScreen('lobby');
       renderLobby(view);
+    } else if (view.status === 'playing' && view.gameType === 'monopoly') {
+      showScreen('game-monopoly');
+      window.MonopolyUI.render(view, emit);
     } else if (view.status === 'playing' && view.gameType === 'railroad') {
       showScreen('game-railroad');
       window.RailroadUI.render(view, emit);
