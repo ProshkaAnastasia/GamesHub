@@ -10,11 +10,11 @@ class Monopoly {
   this.properties=Object.fromEntries(board.filter(b=>b.price).map(b=>[b.id,{owner:null,level:0,mortgaged:false}]));
   this.decks={chance:shuffle(chance.map((_,i)=>i)),chest:shuffle(chest.map((_,i)=>i))};
   this.currentPlayerId=this.playerIds[0];this.stage='roll';this.phase='playing';this.round=1;this.doubles=0;this.dice=null;
-  this.payments=[];this.debt=null;this.purchase=null;this.auction=null;this.bankAuctions=[];this.trade=null;this.log=[];this.lastCard=null;
+  this.payments=[];this.debt=null;this.purchase=null;this.auction=null;this.bankAuctions=[];this.trade=null;this.log=[];this.lastCard=null;this.cardDrawId=0;
   this.finished=false;this.winner=null;this.winReason=null;this.revision=0;
  }
  static create(players){return new Monopoly(players);}
- static fromData(data,players){return Object.assign(Object.create(Monopoly.prototype),data,{players});}
+ static fromData(data,players){return Object.assign(Object.create(Monopoly.prototype),data,{players,cardDrawId:data.cardDrawId??data.lastCard?.id??0});}
  toJSON(){const {players,...data}=this;return data;}
  active(id){return this.playerIds.includes(id)&&!this.accounts[id].bankrupt;}
  alive(){return this.playerIds.filter(id=>this.active(id));}
@@ -45,7 +45,7 @@ class Monopoly {
   if(b.type==='tax')this.queue(id,null,b.amount);
   if(b.type==='gotojail')this.jail(id);
   if(b.type==='chance'||b.type==='chest'){
-   const deck=b.type,num=this.decks[deck].shift(),card=(deck==='chance'?chance:chest)[num];this.lastCard={deck,text:card.text};this.note(card.text);
+   const deck=b.type,num=this.decks[deck].shift(),card=(deck==='chance'?chance:chest)[num];this.cardDrawId=(this.cardDrawId??this.lastCard?.id??0)+1;this.lastCard={id:this.cardDrawId,deck,text:card.text};this.note(card.text);
    if(card.free)a.free.push({deck,num});else this.decks[deck].push(num);
    if(card.money>0)a.cash+=card.money;if(card.money<0)this.queue(id,null,-card.money);
    if(card.jail)this.jail(id);
@@ -57,7 +57,7 @@ class Monopoly {
   }
  }
  die(){return randomInt(1,7);}
- next(){const alive=this.alive();this.currentPlayerId=alive.find(id=>this.playerIds.indexOf(id)>this.playerIds.indexOf(this.currentPlayerId))||alive[0];this.stage='roll';this.doubles=0;this.round++;this.trade=null;}
+ next(){const alive=this.alive();this.currentPlayerId=alive.find(id=>this.playerIds.indexOf(id)>this.playerIds.indexOf(this.currentPlayerId))||alive[0];this.stage='roll';this.doubles=0;this.round++;this.trade=null;this.lastCard=null;}
  checkWin(){const a=this.alive();if(a.length===1){this.finished=true;this.phase='finished';this.winner=a[0];this.winReason=`${this.names[a[0]]} — последний игрок, сохранивший капитал.`;this.trade=null;this.debt=null;this.auction=null;this.purchase=null;}}
  startAuction(index){this.auction={index,bid:0,leader:null,passed:[],turn:this.alive()[0]};this.trade=null;this.note(`Аукцион: ${board[index].name}.`);}
  auctionStep(){
@@ -164,7 +164,9 @@ class Monopoly {
   return error('Неизвестное действие');
  }
  dispatch(id,p){
+  const previousCard=this.lastCard;
   const result=this.action(id,p);if(result.ok){
+   if(this.lastCard===previousCard)this.lastCard=null;
    if(!this.debt&&this.afterDebtMove){const {id:pid,sum}=this.afterDebtMove;this.afterDebtMove=null;if(this.active(pid)){this.move(pid,(this.accounts[pid].position+sum)%40);this.land(pid);this.settle();}}
    if(!this.finished&&!this.debt&&!this.auction&&this.bankAuctions.length)this.startAuction(this.bankAuctions.shift());
   }return result;

@@ -29,3 +29,14 @@ test('complete two-player purchase, rent, bankruptcy, finished room, replay and 
 
 test('buyer and current bidder can mortgage existing property to fund a purchase or bid',()=>{const g=game();own(g,[39]);g.accounts.p0.cash=0;g.purchase={playerId:'p0',index:1};assert.ok(act(g,'p0','mortgage',{index:39}).ok);assert.ok(act(g,'p0','buy').ok);assert.equal(g.accounts.p0.cash,140);g.purchase={playerId:'p0',index:3};act(g,'p0','auction');own(g,[5]);g.accounts.p0.cash=0;assert.ok(act(g,'p0','mortgage',{index:5}).ok);assert.ok(act(g,'p0','bid',{amount:100}).ok);});
 test('trading held jail-release cards transfers the original deck reference only after consent',()=>{const g=game();g.accounts.p0.free=[{deck:'chance',num:7}];const offer={target:'p1',give:[],take:[],cashGive:0,cashTake:25,freeGive:1,freeTake:0};assert.ok(act(g,'p0','trade-offer',offer).ok);assert.equal(g.accounts.p0.free.length,1);act(g,'p1','trade-accept');assert.equal(g.accounts.p0.free.length,0);assert.deepEqual(g.accounts.p1.free,[{deck:'chance',num:7}]);g.currentPlayerId='p1';g.jail('p1');g.stage='roll';act(g,'p1','jail-card');assert.equal(g.decks.chance.at(-1),7);assert.equal(g.accounts.p1.inJail,false);});
+
+test('identical event texts receive distinct persistent draw ids',()=>{const g=game();g.decks.chance=[6];g.accounts.p0.position=7;g.land('p0');assert.equal(g.lastCard.id,1);g.land('p0');assert.equal(g.lastCard.id,2);const restored=Monopoly.fromData(JSON.parse(JSON.stringify(g)),g.players);restored.land('p0');assert.equal(restored.lastCard.id,3);assert.equal(restored.log.filter(t=>t===g.lastCard.text).length,3);const legacy=JSON.parse(JSON.stringify(restored));delete legacy.cardDrawId;const migrated=Monopoly.fromData(legacy,g.players);migrated.next();migrated.accounts[migrated.currentPlayerId].position=7;migrated.land(migrated.currentPlayerId);assert.equal(migrated.lastCard.id,4);});
+
+test('events clear on the next successful step including doubles, while new draws remain visible',()=>{
+ const g=game();g.decks.chance=[6];g.accounts.p0.position=7;g.land('p0');const first=g.lastCard.id;
+ assert.ok(act(g,'p1','roll').error);assert.equal(g.lastCard.id,first);
+ g.stage='roll';g.die=()=>1;assert.ok(act(g,'p0','roll').ok);assert.equal(g.stage,'roll');assert.equal(g.lastCard,null);
+ act(g,'p0','buy');g.accounts.p0.position=3;g.decks.chance=[6];assert.ok(roll(g,[2,2]).ok);assert.equal(g.lastCard.id,first+1);
+ g.accounts.p0.position=39;g.decks.chest=[0];assert.ok(roll(g,[1,2]).ok);assert.equal(g.lastCard.id,first+2);
+ assert.ok(act(g,'p0','end').ok);assert.equal(g.lastCard,null);
+});
